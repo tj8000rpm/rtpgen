@@ -78,15 +78,19 @@ static volatile bool force_quit;
 
 #define NB_MBUF   8192
 
-#define MAX_PKT_BURST 32
-#define BURST_TX_DRAIN_US 10 /* TX drain every ~10us */
+//#define MAX_PKT_BURST 32
+#define MAX_PKT_BURST 512
+//#define BURST_TX_DRAIN_US 10 /* TX drain every ~10us */
+#define BURST_TX_DRAIN_US 5 /* TX drain every ~5us */
 #define MEMPOOL_CACHE_SIZE 256
 
 /*
  * Configurable number of RX/TX ring descriptors
  */
 #define RTE_TEST_RX_DESC_DEFAULT 128
-#define RTE_TEST_TX_DESC_DEFAULT 512
+//#define RTE_TEST_TX_DESC_DEFAULT 512
+//#define RTE_TEST_TX_DESC_DEFAULT 2048
+#define RTE_TEST_TX_DESC_DEFAULT 4096
 static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
 static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
 
@@ -152,9 +156,9 @@ struct orig_rtp_config {
 	uint32_t ip_s_addr;
 	uint16_t udp_d_port;
 	uint16_t udp_s_port;
-	uint16_t rtp_timestamp;
-	uint16_t rtp_sequence;
-	uint16_t rtp_ssrc;
+	uint32_t rtp_timestamp;
+	uint32_t rtp_sequence;
+	uint32_t rtp_ssrc;
 };
 
 struct orig_rtp_config *rtp_configs_per_port[RTE_MAX_ETHPORTS];
@@ -228,7 +232,7 @@ orig_precreate_const_hdrs(struct rte_mbuf *m, uint16_t portid, uint16_t sessioni
 	// init UDP headers;
 	udp=(struct udp_hdr *)rte_pktmbuf_prepend(m,sizeof(struct udp_hdr));
 	udp->src_port=rtp_conf[sessionid].udp_s_port;
-	udp->src_port=rtp_conf[sessionid].udp_d_port;
+	udp->dst_port=rtp_conf[sessionid].udp_d_port;
 	udp->dgram_len=rte_be_to_cpu_16(len+sizeof(struct udp_hdr));
 	udp->dgram_cksum=0;
 
@@ -270,9 +274,6 @@ orig_create_newpacket(uint16_t portid, uint16_t sessionid){
 	uint8_t rtp_ccrc_count;
 	uint8_t rtp_marker;
 	uint8_t rtp_payload_type;
-	uint32_t rtp_sequence;
-	uint32_t rtp_timestamp;
-	uint32_t rtp_ssrc;
 	struct orig_rtp_config *rtp_conf;
 	
 	rtp_conf=rtp_configs_per_port[portid];
@@ -282,32 +283,27 @@ orig_create_newpacket(uint16_t portid, uint16_t sessionid){
 
 	// add RTP headers;
 	rtp=rte_pktmbuf_mtod(m,struct orig_rtp_hdr *);
-	//rtp=(struct orig_rtp_hdr *)rte_pktmbuf_append(m,sizeof(struct orig_rtp_hdr));
 	rtp_version=2;
 	rtp_padding=0;
 	rtp_extention=0;
 	rtp_ccrc_count=0;
 	rtp_marker=0;
 	rtp_payload_type=0;
-	rtp_sequence=rtp_conf[sessionid].rtp_sequence;
-	rtp_timestamp=rtp_conf[sessionid].rtp_timestamp;
-	rtp_ssrc=rtp_conf[sessionid].rtp_ssrc;
-	rtp->flags=rte_be_to_cpu_16((rtp_version     &0x3 )<<14|
-	                            (rtp_padding     &0x1 )<<13|
-	                            (rtp_extention   &0x1 )<<12|
-	                            (rtp_ccrc_count  &0xf )<<8|
-	                            (rtp_marker      &0x1 )<<7|
-	                            (rtp_payload_type&0x7f));
-	rtp->sequence=rte_be_to_cpu_16(rtp_sequence);
-	rtp->timestamp=rte_be_to_cpu_32(rtp_timestamp);
-	rtp->ssrc=rte_be_to_cpu_32(rtp_ssrc);
+	rtp->flags=rte_be_to_cpu_16((rtp_version     &0x3 ) << 14 |
+	                            (rtp_padding     &0x1 ) << 13 |
+	                            (rtp_extention   &0x1 ) << 12 |
+	                            (rtp_ccrc_count  &0xf ) <<  8 |
+	                            (rtp_marker      &0x1 ) <<  7 |
+	                            (rtp_payload_type&0x7f)        );
+	rtp->sequence =rte_be_to_cpu_16(rtp_conf[sessionid].rtp_sequence);
+	rtp->timestamp=rte_be_to_cpu_32(rtp_conf[sessionid].rtp_timestamp);
+	rtp->ssrc     =rte_be_to_cpu_32(rtp_conf[sessionid].rtp_ssrc);
 
 	m->pkt_len =sizeof(struct orig_rtp_hdr);
 	m->data_len=sizeof(struct orig_rtp_hdr);
 
-	// definePayloads;
+	// append Payload data;
 	payload=(char *)rte_pktmbuf_append(m,sizeof(char)*PAYLOAD_LEN);
-	//payload=rte_pktmbuf_mtod(m, char *);
 	for(i=0;i<PAYLOAD_LEN;i++)
 		payload[i]=i&0xff;
 
@@ -338,7 +334,6 @@ orig_send_packet(struct rte_mbuf *m, unsigned portid)
 static void
 orig_main_loop(void)
 {
-	//struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	struct rte_mbuf *m;
 	int sent;
 	unsigned lcore_id;
@@ -355,7 +350,7 @@ orig_main_loop(void)
 	timer_tsc = 0;
 	orig_rtp_timer_tsc = 0;
 	const uint64_t orig_rtp_tx_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
-			ORIG_RTP_TX_INTERVAL_US;
+			(ORIG_RTP_TX_INTERVAL_US - 2*BURST_TX_DRAIN_US);
 
 	lcore_id = rte_lcore_id();
 	// coreごとのqueue情報の確認
@@ -1005,8 +1000,8 @@ main(int argc, char **argv)
 			tmp_set[i].portid=portid;
 			tmp_set[i].ip_d_addr=rte_be_to_cpu_32(IPv4(192,168,0,(i+5)&0xff));
 			tmp_set[i].ip_s_addr=rte_be_to_cpu_32(IPv4(192,168,1,(i+5)&0xff));
-			tmp_set[i].udp_d_port=rte_be_to_cpu_16(60000+1000*portid+i);
-			tmp_set[i].udp_s_port=rte_be_to_cpu_16(50000+1000*portid+i);
+			tmp_set[i].udp_d_port=rte_be_to_cpu_16(6000+1000*portid+i);
+			tmp_set[i].udp_s_port=rte_be_to_cpu_16(8000+1000*portid+i);
 			tmp_set[i].rtp_timestamp=0;
 			tmp_set[i].rtp_sequence=0;
 			tmp_set[i].rtp_ssrc=rand();
