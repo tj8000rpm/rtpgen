@@ -74,7 +74,7 @@
 
 static volatile bool force_quit;
 
-#define RTE_LOGTYPE_L2FWD RTE_LOGTYPE_USER1
+#define RTE_LOGTYPE_RTPGEN RTE_LOGTYPE_USER1
 
 #define NB_MBUF   8192
 
@@ -141,7 +141,7 @@ struct l2fwd_port_statistics {
 } __rte_cache_aligned;
 struct l2fwd_port_statistics port_statistics[RTE_MAX_ETHPORTS];
 
-struct orig_rtp_hdr {
+struct rtpgen_rtp_hdr {
         uint16_t flags;
         uint16_t sequence;
         uint32_t timestamp;
@@ -149,7 +149,7 @@ struct orig_rtp_hdr {
 } __attribute__((__packed__));
 
 #define ORIG_RTP_MAX_SESSIONS 50000
-struct orig_rtp_config {
+struct rtpgen_rtp_config {
 	bool enabled;
 	uint8_t portid;
 	uint32_t ip_d_addr;
@@ -161,10 +161,10 @@ struct orig_rtp_config {
 	uint32_t rtp_ssrc;
 };
 
-struct orig_rtp_config *rtp_configs_per_port[RTE_MAX_ETHPORTS];
+struct rtpgen_rtp_config *rtp_configs_per_port[RTE_MAX_ETHPORTS];
 
 #define ORIG_RTP_TX_INTERVAL_US 20000 /* TX rtp packet every ~20ms = ~20000us */
-static unsigned int orig_sessions = 1;
+static unsigned int rtpgen_sessions = 1;
 
 #define MAX_TIMER_PERIOD 86400 /* 1 day max */
 /* A tsc-based timer responsible for triggering statistics printout */
@@ -218,13 +218,13 @@ print_stats(void)
 
 // baseパケットの生成
 static struct rte_mbuf *
-orig_precreate_const_hdrs(struct rte_mbuf *m, uint16_t portid, uint16_t sessionid){
+rtpgen_precreate_const_hdrs(struct rte_mbuf *m, uint16_t portid, uint16_t sessionid){
 
 	struct ether_hdr *eth;
 	struct ipv4_hdr *ip;
 	struct udp_hdr *udp;
 	uint16_t len;
-	struct orig_rtp_config *rtp_conf;
+	struct rtpgen_rtp_config *rtp_conf;
 
 	rtp_conf=rtp_configs_per_port[portid];
 
@@ -262,9 +262,9 @@ orig_precreate_const_hdrs(struct rte_mbuf *m, uint16_t portid, uint16_t sessioni
 
 // 送信タイミングでのpacketの生成
 static struct rte_mbuf *
-orig_create_newpacket(uint16_t portid, uint16_t sessionid){
+rtpgen_create_newpacket(uint16_t portid, uint16_t sessionid){
 	uint16_t PAYLOAD_LEN = 160;
-	struct orig_rtp_hdr *rtp;
+	struct rtpgen_rtp_hdr *rtp;
 	struct rte_mbuf *m;
 	char *payload;
 	int i;
@@ -274,7 +274,7 @@ orig_create_newpacket(uint16_t portid, uint16_t sessionid){
 	uint8_t rtp_ccrc_count;
 	uint8_t rtp_marker;
 	uint8_t rtp_payload_type;
-	struct orig_rtp_config *rtp_conf;
+	struct rtpgen_rtp_config *rtp_conf;
 	
 	rtp_conf=rtp_configs_per_port[portid];
 
@@ -282,7 +282,7 @@ orig_create_newpacket(uint16_t portid, uint16_t sessionid){
 	m=rte_pktmbuf_alloc(l2fwd_pktmbuf_pool);
 
 	// add RTP headers;
-	rtp=rte_pktmbuf_mtod(m,struct orig_rtp_hdr *);
+	rtp=rte_pktmbuf_mtod(m,struct rtpgen_rtp_hdr *);
 	rtp_version=2;
 	rtp_padding=0;
 	rtp_extention=0;
@@ -299,8 +299,8 @@ orig_create_newpacket(uint16_t portid, uint16_t sessionid){
 	rtp->timestamp=rte_be_to_cpu_32(rtp_conf[sessionid].rtp_timestamp);
 	rtp->ssrc     =rte_be_to_cpu_32(rtp_conf[sessionid].rtp_ssrc);
 
-	m->pkt_len =sizeof(struct orig_rtp_hdr);
-	m->data_len=sizeof(struct orig_rtp_hdr);
+	m->pkt_len =sizeof(struct rtpgen_rtp_hdr);
+	m->data_len=sizeof(struct rtpgen_rtp_hdr);
 
 	// append Payload data;
 	payload=(char *)rte_pktmbuf_append(m,sizeof(char)*PAYLOAD_LEN);
@@ -315,7 +315,7 @@ orig_create_newpacket(uint16_t portid, uint16_t sessionid){
 
 // packetの生成
 static void
-orig_send_packet(struct rte_mbuf *m, unsigned portid)
+rtpgen_send_packet(struct rte_mbuf *m, unsigned portid)
 {
 	int sent;
 	struct rte_eth_dev_tx_buffer *buffer;
@@ -332,12 +332,12 @@ orig_send_packet(struct rte_mbuf *m, unsigned portid)
 
 /* main processing loop */
 static void
-orig_main_loop(void)
+rtpgen_main_loop(void)
 {
 	struct rte_mbuf *m;
 	int sent;
 	unsigned lcore_id;
-	uint64_t prev_tsc, diff_tsc, cur_tsc, timer_tsc, orig_rtp_timer_tsc;
+	uint64_t prev_tsc, diff_tsc, cur_tsc, timer_tsc, rtpgen_rtp_timer_tsc;
 	//unsigned i, j, portid, nb_rx;
 	unsigned i, portid, sessionid;
 	struct lcore_queue_conf *qconf;
@@ -348,8 +348,8 @@ orig_main_loop(void)
 
 	prev_tsc = 0;
 	timer_tsc = 0;
-	orig_rtp_timer_tsc = 0;
-	const uint64_t orig_rtp_tx_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
+	rtpgen_rtp_timer_tsc = 0;
+	const uint64_t rtpgen_rtp_tx_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
 			(ORIG_RTP_TX_INTERVAL_US - 2*BURST_TX_DRAIN_US);
 
 	lcore_id = rte_lcore_id();
@@ -362,17 +362,17 @@ orig_main_loop(void)
 	// EALオプションから指定されているが、
 	// RX_Queueのアサインがされていないlcoreを除外
 	if (qconf->n_rx_port == 0) {
-		RTE_LOG(INFO, L2FWD, "lcore %u has nothing to do\n", lcore_id);
+		RTE_LOG(INFO, RTPGEN, "lcore %u has nothing to do\n", lcore_id);
 		return;
 	}
 
-	RTE_LOG(INFO, L2FWD, "entering main loop on lcore %u\n", lcore_id);
+	RTE_LOG(INFO, RTPGEN, "entering main loop on lcore %u\n", lcore_id);
 
 	// debug表示用
 	for (i = 0; i < qconf->n_rx_port; i++) {
 
 		portid = qconf->rx_port_list[i];
-		RTE_LOG(INFO, L2FWD, " -- lcoreid=%u portid=%u\n", lcore_id,
+		RTE_LOG(INFO, RTPGEN, " -- lcoreid=%u portid=%u\n", lcore_id,
 			portid);
 
 	}
@@ -400,7 +400,8 @@ orig_main_loop(void)
 		// すなわちこのサイクルがドレイン時間(10us)を超えた場合の処理
 		// と、最初の１回めの処理。
 		// => 10us秒毎の処理ってこと・・・。
-		if (unlikely(diff_tsc > drain_tsc)) {
+		//if (unlikely(diff_tsc > drain_tsc)) {
+		if (diff_tsc > drain_tsc) {
 			for (i = 0; i < qconf->n_rx_port; i++) {
 
 				portid = l2fwd_dst_ports[qconf->rx_port_list[i]];
@@ -443,20 +444,20 @@ orig_main_loop(void)
 			}
 
 			/* 上記要領に習い、50ミリ秒単位でパケットを送信 */
-			orig_rtp_timer_tsc += diff_tsc;
+			rtpgen_rtp_timer_tsc += diff_tsc;
 			/* if timer has reached  */
-			if (unlikely( orig_rtp_timer_tsc > orig_rtp_tx_tsc )){
+			if (unlikely( rtpgen_rtp_timer_tsc > rtpgen_rtp_tx_tsc )){
 				
 				for (i = 0; i < qconf->n_rx_port; i++) {
 					// rxqueueのport_idを取得
 					portid = qconf->rx_port_list[i];
-					for (sessionid=0; sessionid<orig_sessions; sessionid++){
-						m=orig_create_newpacket(portid, sessionid);
-						m=orig_precreate_const_hdrs(m, portid, sessionid);
-						orig_send_packet(m, portid);
+					for (sessionid=0; sessionid<rtpgen_sessions; sessionid++){
+						m=rtpgen_create_newpacket(portid, sessionid);
+						m=rtpgen_precreate_const_hdrs(m, portid, sessionid);
+						rtpgen_send_packet(m, portid);
 					}
 				}
-				orig_rtp_timer_tsc=0;
+				rtpgen_rtp_timer_tsc=0;
 			}
 
 			// tscの今回値を前回値に更新
@@ -470,15 +471,15 @@ orig_main_loop(void)
 // 呼ばれる。そのコアにQueueが割り振られてるかどうかは
 // main_loop側で判断してる。
 static int
-orig_launch_one_lcore(__attribute__((unused)) void *dummy)
+rtpgen_launch_one_lcore(__attribute__((unused)) void *dummy)
 {
-	orig_main_loop();
+	rtpgen_main_loop();
 	return 0;
 }
 
 /* display usage */
 static void
-orig_usage(const char *prgname)
+rtpgen_usage(const char *prgname)
 {
 	printf("%s [EAL options] -- -p PORTMASK [-q NQ]\n"
 	       "  -p PORTMASK: hexadecimal bitmask of ports to configure\n"
@@ -492,7 +493,7 @@ orig_usage(const char *prgname)
 }
 
 static int
-orig_parse_portmask(const char *portmask)
+rtpgen_parse_portmask(const char *portmask)
 {
 	char *end = NULL;
 	unsigned long pm;
@@ -509,7 +510,7 @@ orig_parse_portmask(const char *portmask)
 }
 
 static unsigned int
-orig_parse_nqueue(const char *q_arg)
+rtpgen_parse_nqueue(const char *q_arg)
 {
 	char *end = NULL;
 	unsigned long n;
@@ -527,7 +528,7 @@ orig_parse_nqueue(const char *q_arg)
 }
 
 static unsigned int
-orig_parse_nsesisons(const char *q_arg)
+rtpgen_parse_nsesisons(const char *q_arg)
 {
 	char *end = NULL;
 	unsigned long n;
@@ -545,7 +546,7 @@ orig_parse_nsesisons(const char *q_arg)
 }
 
 static int
-orig_parse_timer_period(const char *q_arg)
+rtpgen_parse_timer_period(const char *q_arg)
 {
 	char *end = NULL;
 	int n;
@@ -577,7 +578,7 @@ enum {
 
 /* Parse the argument given in the command line of the application */
 static int
-orig_parse_args(int argc, char **argv)
+rtpgen_parse_args(int argc, char **argv)
 {
 	int opt, ret, timer_secs;
 	char **argvopt;
@@ -592,30 +593,30 @@ orig_parse_args(int argc, char **argv)
 		switch (opt) {
 		/* portmask */
 		case 'p':
-			l2fwd_enabled_port_mask = orig_parse_portmask(optarg);
+			l2fwd_enabled_port_mask = rtpgen_parse_portmask(optarg);
 			if (l2fwd_enabled_port_mask == 0) {
 				printf("invalid portmask\n");
-				orig_usage(prgname);
+				rtpgen_usage(prgname);
 				return -1;
 			}
 			break;
 
 		/* nqueue */
 		case 'q':
-			l2fwd_rx_queue_per_lcore = orig_parse_nqueue(optarg);
+			l2fwd_rx_queue_per_lcore = rtpgen_parse_nqueue(optarg);
 			if (l2fwd_rx_queue_per_lcore == 0) {
 				printf("invalid queue number\n");
-				orig_usage(prgname);
+				rtpgen_usage(prgname);
 				return -1;
 			}
 			break;
 
 		/* timer period */
 		case 'T':
-			timer_secs = orig_parse_timer_period(optarg);
+			timer_secs = rtpgen_parse_timer_period(optarg);
 			if (timer_secs < 0) {
 				printf("invalid timer period\n");
-				orig_usage(prgname);
+				rtpgen_usage(prgname);
 				return -1;
 			}
 			timer_period = timer_secs;
@@ -623,10 +624,10 @@ orig_parse_args(int argc, char **argv)
 
 		/* number of sessions */
 		case 's':
-			orig_sessions = orig_parse_nsesisons(optarg);
-			if (orig_sessions == 0) {
+			rtpgen_sessions = rtpgen_parse_nsesisons(optarg);
+			if (rtpgen_sessions == 0) {
 				printf("invalid session number\n");
-				orig_usage(prgname);
+				rtpgen_usage(prgname);
 				return -1;
 			}
 			break;
@@ -637,7 +638,7 @@ orig_parse_args(int argc, char **argv)
 			break;
 
 		default:
-			orig_usage(prgname);
+			rtpgen_usage(prgname);
 			return -1;
 		}
 	}
@@ -758,7 +759,7 @@ main(int argc, char **argv)
 	unsigned i;
 	unsigned lcore_id, rx_lcore_id;
 	unsigned nb_ports_in_mask = 0;
-	struct orig_rtp_config *tmp_set;
+	struct rtpgen_rtp_config *tmp_set;
 
 	srand((unsigned)time(NULL));
 
@@ -776,9 +777,9 @@ main(int argc, char **argv)
 	signal(SIGUSR1, signal_handler);
 
 	/* parse application arguments (after the EAL ones) */
-	ret = orig_parse_args(argc, argv);
+	ret = rtpgen_parse_args(argc, argv);
 	if (ret < 0)
-		rte_exit(EXIT_FAILURE, "Invalid L2FWD arguments\n");
+		rte_exit(EXIT_FAILURE, "Invalid RTPGEN arguments\n");
 
 	//printf("MAC updating %s\n", mac_updating ? "enabled" : "disabled");
 
@@ -992,10 +993,10 @@ main(int argc, char **argv)
 				 portid);
 
 		/* 各ポート毎のセッション情報を初期化 */
-		rtp_configs_per_port[portid]=(struct orig_rtp_config *)malloc(sizeof(struct orig_rtp_config)*ORIG_RTP_MAX_SESSIONS);
+		rtp_configs_per_port[portid]=(struct rtpgen_rtp_config *)malloc(sizeof(struct rtpgen_rtp_config)*ORIG_RTP_MAX_SESSIONS);
 		tmp_set=rtp_configs_per_port[portid];
 
-		for(i=0; i<orig_sessions; i++){
+		for(i=0; i<rtpgen_sessions; i++){
 			tmp_set[i].enabled=true;
 			tmp_set[i].portid=portid;
 			tmp_set[i].ip_d_addr=rte_be_to_cpu_32(IPv4(192,168,0,(i+5)&0xff));
@@ -1057,13 +1058,13 @@ main(int argc, char **argv)
 	// Launch a function on all lcores.
 	// int rte_eal_mp_remote_launch	
 	// 
-	// f		orig_launch_one_lcore
-	// arg		NULL => orig_launch_one_lcoreの引数
+	// f		rtpgen_launch_one_lcore
+	// arg		NULL => rtpgen_launch_one_lcoreの引数
 	// call_master	CALL_MASTER => たぶん自分自身からよんだってこと?
 	//
 	// EAL側オプションで指定したcoremaskでonになってるものだけ
 	// lcore数分fを実行していく。
-	rte_eal_mp_remote_launch(orig_launch_one_lcore, NULL, CALL_MASTER);
+	rte_eal_mp_remote_launch(rtpgen_launch_one_lcore, NULL, CALL_MASTER);
 	RTE_LCORE_FOREACH_SLAVE(lcore_id) {
 		// http://doc.dpdk.org/api/rte__launch_8h.html#a1282dc7cd7e6793afab3ef29239ddf54
 		// Wait until an lcore finishes its job.
