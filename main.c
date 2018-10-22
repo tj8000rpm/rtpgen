@@ -141,6 +141,16 @@ struct l2fwd_port_statistics {
 } __rte_cache_aligned;
 struct l2fwd_port_statistics port_statistics[RTE_MAX_ETHPORTS];
 
+
+/* 
+ * RTPGEN specified varibles
+ */
+
+#define RTPGEN_RTP_MAX_SESSIONS 50000
+#define RTPGEN_RTP_TX_INTERVAL_US 20000 /* TX rtp packet every ~20ms = ~20000us */
+#define RTPGEN_RTP_PAYLOAD_MAX_LEN 20000
+#define RTPGEN_RTP_PAYLOAD_LEN 160
+
 struct rtpgen_rtp_hdr {
         uint16_t flags;
         uint16_t sequence;
@@ -148,7 +158,6 @@ struct rtpgen_rtp_hdr {
         uint32_t ssrc;
 } __attribute__((__packed__));
 
-#define ORIG_RTP_MAX_SESSIONS 50000
 struct rtpgen_rtp_config {
 	bool enabled;
 	uint8_t portid;
@@ -163,8 +172,13 @@ struct rtpgen_rtp_config {
 
 struct rtpgen_rtp_config *rtp_configs_per_port[RTE_MAX_ETHPORTS];
 
-#define ORIG_RTP_TX_INTERVAL_US 20000 /* TX rtp packet every ~20ms = ~20000us */
 static unsigned int rtpgen_sessions = 1;
+static unsigned int rtpgen_payload_data_len = RTPGEN_RTP_PAYLOAD_LEN;
+static uint8_t rtpgen_payload_data[RTPGEN_RTP_PAYLOAD_MAX_LEN];
+
+/* 
+ * RTPGEN specified varibles end
+ */
 
 #define MAX_TIMER_PERIOD 86400 /* 1 day max */
 /* A tsc-based timer responsible for triggering statistics printout */
@@ -216,9 +230,9 @@ print_stats(void)
 	printf("\n====================================================\n");
 }
 
-// baseパケットの生成
+/* ether/ipv4/udpの追加 */
 static struct rte_mbuf *
-rtpgen_precreate_const_hdrs(struct rte_mbuf *m, uint16_t portid, uint16_t sessionid){
+rtpgen_prepend_headers(struct rte_mbuf *m, uint16_t portid, uint16_t sessionid){
 
 	struct ether_hdr *eth;
 	struct ipv4_hdr *ip;
@@ -263,11 +277,10 @@ rtpgen_precreate_const_hdrs(struct rte_mbuf *m, uint16_t portid, uint16_t sessio
 // 送信タイミングでのpacketの生成
 static struct rte_mbuf *
 rtpgen_create_newpacket(uint16_t portid, uint16_t sessionid){
-	uint16_t PAYLOAD_LEN = 160;
 	struct rtpgen_rtp_hdr *rtp;
 	struct rte_mbuf *m;
-	char *payload;
-	int i;
+	uint8_t *payload;
+	unsigned i, payload_idx;
 	uint8_t rtp_version;
 	uint8_t rtp_padding;
 	uint8_t rtp_extention;
@@ -303,12 +316,22 @@ rtpgen_create_newpacket(uint16_t portid, uint16_t sessionid){
 	m->data_len=sizeof(struct rtpgen_rtp_hdr);
 
 	// append Payload data;
-	payload=(char *)rte_pktmbuf_append(m,sizeof(char)*PAYLOAD_LEN);
-	for(i=0;i<PAYLOAD_LEN;i++)
-		payload[i]=i&0xff;
+	payload=(uint8_t *)rte_pktmbuf_append(m,sizeof(uint8_t)*RTPGEN_RTP_PAYLOAD_LEN);
+	payload_idx=rtp_conf[sessionid].rtp_sequence;
+	payload_idx*=RTPGEN_RTP_PAYLOAD_LEN;
+	payload_idx%=RTPGEN_RTP_PAYLOAD_LEN;
+	payload=rtpgen_payload_data+payload_idx;
 
-	rtp_conf[sessionid].rtp_timestamp+=PAYLOAD_LEN;
+	for(i=0;i<RTPGEN_RTP_PAYLOAD_LEN;i++){
+	//	payload[i]=rtpgen_payload_data[payload_idx];
+	//	printf("%d : %X\n",i,rtpgen_payload_data[i]);
+		printf("%d : %X\n",i,payload[i]);
+	}
+
+	rtp_conf[sessionid].rtp_timestamp+=RTPGEN_RTP_PAYLOAD_LEN;
 	rtp_conf[sessionid].rtp_sequence+=1;
+
+	m=rtpgen_prepend_headers(m, portid, sessionid);
 
 	return m;
 }
@@ -330,15 +353,25 @@ rtpgen_send_packet(struct rte_mbuf *m, unsigned portid)
 	}
 }
 
+/* RTPペイロードデータのよみこみ */
+static void
+rtpgen_set_payload_data(void){
+	unsigned i;
+	// data flush
+	rtpgen_payload_data_len++;
+	memset(rtpgen_payload_data, 0, sizeof(char)*RTPGEN_RTP_PAYLOAD_MAX_LEN);
+
+	for(i=0; i<rtpgen_payload_data_len; i++){
+		rtpgen_payload_data[i]=(0x00+i)&0x0000ff;
+	}
+}
+
 /* main processing loop */
 static void
-rtpgen_main_loop(void)
-{
-	struct rte_mbuf *m;
+rtpgen_main_loop(void){
 	int sent;
 	unsigned lcore_id;
 	uint64_t prev_tsc, diff_tsc, cur_tsc, timer_tsc, rtpgen_rtp_timer_tsc;
-	//unsigned i, j, portid, nb_rx;
 	unsigned i, portid, sessionid;
 	struct lcore_queue_conf *qconf;
 
@@ -350,7 +383,7 @@ rtpgen_main_loop(void)
 	timer_tsc = 0;
 	rtpgen_rtp_timer_tsc = 0;
 	const uint64_t rtpgen_rtp_tx_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
-			(ORIG_RTP_TX_INTERVAL_US - 2*BURST_TX_DRAIN_US);
+			(RTPGEN_RTP_TX_INTERVAL_US - 2*BURST_TX_DRAIN_US);
 
 	lcore_id = rte_lcore_id();
 	// coreごとのqueue情報の確認
@@ -425,7 +458,7 @@ rtpgen_main_loop(void)
 			// timer_period default=10, 
 			// すなわち何かしら設定があれば必ずチェック
 			//
-			// で、１０秒に一回statsを更新するための処理なわけだ。
+			// で、n秒に一回statsを更新するための処理なわけだ。
 			if (timer_period > 0) {
 
 				/* advance the timer */
@@ -443,7 +476,8 @@ rtpgen_main_loop(void)
 				}
 			}
 
-			/* 上記要領に習い、50ミリ秒単位でパケットを送信 */
+			/* 上記要領に習い、パケット化周期単位でパケットを送信 */
+			// RTPGEN_RTP_TX_INTERVAL_US = pkt化周期
 			rtpgen_rtp_timer_tsc += diff_tsc;
 			/* if timer has reached  */
 			if (unlikely( rtpgen_rtp_timer_tsc > rtpgen_rtp_tx_tsc )){
@@ -452,9 +486,9 @@ rtpgen_main_loop(void)
 					// rxqueueのport_idを取得
 					portid = qconf->rx_port_list[i];
 					for (sessionid=0; sessionid<rtpgen_sessions; sessionid++){
-						m=rtpgen_create_newpacket(portid, sessionid);
-						m=rtpgen_precreate_const_hdrs(m, portid, sessionid);
-						rtpgen_send_packet(m, portid);
+						rtpgen_send_packet(
+							rtpgen_create_newpacket(portid, sessionid),
+							portid);
 					}
 				}
 				rtpgen_rtp_timer_tsc=0;
@@ -539,7 +573,7 @@ rtpgen_parse_nsesisons(const char *q_arg)
 		return 0;
 	if (n == 0)
 		return 0;
-	if (n >= ORIG_RTP_MAX_SESSIONS)
+	if (n >= RTPGEN_RTP_MAX_SESSIONS)
 		return 0;
 
 	return n;
@@ -993,7 +1027,7 @@ main(int argc, char **argv)
 				 portid);
 
 		/* 各ポート毎のセッション情報を初期化 */
-		rtp_configs_per_port[portid]=(struct rtpgen_rtp_config *)malloc(sizeof(struct rtpgen_rtp_config)*ORIG_RTP_MAX_SESSIONS);
+		rtp_configs_per_port[portid]=(struct rtpgen_rtp_config *)malloc(sizeof(struct rtpgen_rtp_config)*RTPGEN_RTP_MAX_SESSIONS);
 		tmp_set=rtp_configs_per_port[portid];
 
 		for(i=0; i<rtpgen_sessions; i++){
@@ -1007,6 +1041,9 @@ main(int argc, char **argv)
 			tmp_set[i].rtp_sequence=0;
 			tmp_set[i].rtp_ssrc=rand();
 		}
+
+		/* RTPペイロードのデータを初期化 */
+		rtpgen_set_payload_data();
 
 		/* Start device */
 		// https://doc.dpdk.org/api/rte__ethdev_8h.html#afdc834c1c52e9fb512301990468ca7c2
