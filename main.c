@@ -76,7 +76,8 @@ static volatile bool force_quit;
 
 #define RTE_LOGTYPE_RTPGEN RTE_LOGTYPE_USER1
 
-#define NB_MBUF   8192
+//#define NB_MBUF   8192
+#define NB_MBUF   8192*2
 
 //#define MAX_PKT_BURST 32
 #define MAX_PKT_BURST 512
@@ -91,6 +92,7 @@ static volatile bool force_quit;
 //#define RTE_TEST_TX_DESC_DEFAULT 512
 //#define RTE_TEST_TX_DESC_DEFAULT 2048
 #define RTE_TEST_TX_DESC_DEFAULT 4096
+
 static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
 static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
 
@@ -164,10 +166,6 @@ struct rtpgen_rtp_hdr {
 struct rtpgen_rtp_config {
 	bool enabled;
 	uint8_t portid;
-	uint32_t ip_d_addr;
-	uint32_t ip_s_addr;
-	uint16_t udp_d_port;
-	uint16_t udp_s_port;
 	uint32_t rtp_timestamp;
 	uint32_t rtp_sequence;
 	uint32_t rtp_ssrc;
@@ -327,6 +325,17 @@ rtpgen_send_packet(struct rte_mbuf *m, unsigned portid)
 	}
 }
 
+// aaa
+void origcb(struct rte_mbuf ** 	pkts, uint16_t 	unsent, void * 	userdata ){
+	struct rte_mbuf *m;
+	int i=0;
+	for(i=0;i<unsent;i++){
+		m=pkts[i];
+		printf("unsented-data!!!!!!\n");
+		rte_pktmbuf_dump(stdout, m, m->data_len);
+	}
+}	
+
 /* RTPペイロードデータのよみこみ */
 static void
 rtpgen_set_payload_data(void){
@@ -388,13 +397,17 @@ static void
 rtpgen_main_loop(void){
 	int sent;
 	unsigned lcore_id;
-	uint64_t prev_tsc, diff_tsc, cur_tsc, timer_tsc, rtpgen_rtp_timer_tsc;
-	unsigned i, portid, sessionid;
+	uint64_t prev_tsc, diff_tsc, cur_tsc, timer_tsc;
+	uint64_t rtpgen_rtp_timer_tsc,
+		 rtpgen_prev_tsc, rtpgen_diff_tsc;
+	unsigned i, portid, sessionid, cur_sessionid, generated;
 	struct lcore_queue_conf *qconf;
 
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
 			BURST_TX_DRAIN_US;
 	struct rte_eth_dev_tx_buffer *buffer;
+
+	struct rte_mbuf *tx_bursts[RTPGEN_RTP_MAX_SESSIONS];
 
 	prev_tsc = 0;
 	timer_tsc = 0;
@@ -427,6 +440,7 @@ rtpgen_main_loop(void){
 
 	}
 
+	cur_sessionid=0;
 	while (!force_quit) {
 		// http://doc.dpdk.org/api-1.6/rte__cycles_8h.html#a16fa7ef140377a37bc66b336dd54ff70
 		// Return the number of TSC cycles since boot
@@ -443,6 +457,7 @@ rtpgen_main_loop(void){
 		 */
 		// tscの前回呼び出しからの差分を取得
 		diff_tsc = cur_tsc - prev_tsc;
+
 		// unlikelyはマクロ関数
 		// CPUにこの条件式がだいたい成立しないことを支持するため。
 		// へーーー
@@ -450,8 +465,8 @@ rtpgen_main_loop(void){
 		// すなわちこのサイクルがドレイン時間(10us)を超えた場合の処理
 		// と、最初の１回めの処理。
 		// => 10us秒毎の処理ってこと・・・。
-		//if (unlikely(diff_tsc > drain_tsc)) {
-		if (diff_tsc > drain_tsc) {
+		//if (diff_tsc > drain_tsc) {
+		if (unlikely(diff_tsc > drain_tsc)) {
 			for (i = 0; i < qconf->n_rx_port; i++) {
 
 				portid = l2fwd_dst_ports[qconf->rx_port_list[i]];
@@ -466,7 +481,7 @@ rtpgen_main_loop(void){
 				sent = rte_eth_tx_buffer_flush(portid, 0, buffer);
 				// sentに送信できたパケット数が入るためstatに追加
 				if (sent){
-					port_statistics[portid].tx += sent;
+				     port_statistics[portid].tx += sent;
 				}
 
 			}
@@ -493,12 +508,13 @@ rtpgen_main_loop(void){
 				}
 			}
 
+			/* advance the timer */
+			rtpgen_rtp_timer_tsc += diff_tsc;
 			/* 上記要領に習い、パケット化周期単位でパケットを送信 */
 			// RTPGEN_RTP_TX_INTERVAL_US = pkt化周期
-			rtpgen_rtp_timer_tsc += diff_tsc;
 			/* if timer has reached  */
-			if (unlikely( rtpgen_rtp_timer_tsc > rtpgen_rtp_tx_tsc )){
-				
+
+			if (unlikely( rtpgen_rtp_timer_tsc >= rtpgen_rtp_tx_tsc )){
 				for (i = 0; i < qconf->n_rx_port; i++) {
 					// rxqueueのport_idを取得
 					portid = qconf->rx_port_list[i];
@@ -507,13 +523,51 @@ rtpgen_main_loop(void){
 							rtpgen_create_newpacket(portid, sessionid),
 							portid);
 					}
+
+					rtpgen_rtp_timer_tsc=0;
 				}
-				rtpgen_rtp_timer_tsc=0;
 			}
+
+/*
+			if (unlikely( rtpgen_rtp_timer_tsc >= rtpgen_rtp_tx_tsc )){
+				if(cur_sessionid == 0){
+					rtpgen_prev_tsc=cur_tsc;
+					for (sessionid=0; sessionid<rtpgen_sessions; sessionid++){
+						//rtpgen_send_packet(
+						//	rtpgen_create_newpacket(portid, sessionid),
+						//	portid);
+						tx_bursts[sessionid]=rtpgen_create_newpacket(portid, sessionid);
+					}
+				}
+				
+				for (i = 0; i < qconf->n_rx_port; i++) {
+					// rxqueueのport_idを取得
+					portid = qconf->rx_port_list[i];
+					sent = rte_eth_tx_burst(portid, 0, tx_bursts+cur_sessionid, rtpgen_sessions-cur_sessionid);
+					if(sent)
+				 		port_statistics[portid].tx += sent;
+
+					for (sessionid=cur_sessionid; sessionid<cur_sessionid+sent; sessionid++){
+						rte_pktmbuf_free(tx_bursts[sessionid]);
+					}
+
+					cur_sessionid+=sent;
+
+					if(cur_sessionid >= rtpgen_sessions){
+						rtpgen_rtp_timer_tsc=cur_tsc-rtpgen_prev_tsc;
+						cur_sessionid=0;
+					}
+
+				}
+			}
+*/
 
 			// tscの今回値を前回値に更新
 			prev_tsc = cur_tsc;
 		}
+
+
+		//}
 
 	}
 }
@@ -1058,6 +1112,7 @@ main(int argc, char **argv)
 		// ていうcallback functionなんだろうなぁ。
 		ret = rte_eth_tx_buffer_set_err_callback(tx_buffer[portid],
 				rte_eth_tx_buffer_count_callback,
+				//origcb,
 				&port_statistics[portid].dropped);
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE,
@@ -1071,16 +1126,11 @@ main(int argc, char **argv)
 		for(i=0; i<rtpgen_sessions; i++){
 			tmp_set[i].enabled=true;
 			tmp_set[i].portid=portid;
-			tmp_set[i].ip_d_addr=rte_be_to_cpu_32(IPv4(192,168,0,(i+5)&0xff));
-			tmp_set[i].ip_s_addr=rte_be_to_cpu_32(IPv4(192,168,1,(i+5)&0xff));
-			tmp_set[i].udp_d_port=rte_be_to_cpu_16(6000+1000*portid+i);
-			tmp_set[i].udp_s_port=rte_be_to_cpu_16(8000+1000*portid+i);
 			tmp_set[i].rtp_timestamp=0;
 			tmp_set[i].rtp_sequence=0;
 			tmp_set[i].rtp_ssrc=rand();
 			
 			len=RTPGEN_RTP_PAYLOAD_LEN + sizeof(struct rtpgen_rtp_hdr);
-
 			len+=sizeof(struct udp_hdr);
 			constantHeaders[i].udp.src_port=rte_be_to_cpu_16(6000+1000*portid+i);
                         constantHeaders[i].udp.dst_port=rte_be_to_cpu_16(8000+1000*portid+i);
@@ -1088,8 +1138,8 @@ main(int argc, char **argv)
                         constantHeaders[i].udp.dgram_cksum=0;
 
 			len+=sizeof(struct ipv4_hdr);
-			constantHeaders[i].ip.dst_addr=rte_be_to_cpu_32(IPv4(192,168,0,(i+5)&0xff));
-			constantHeaders[i].ip.src_addr=rte_be_to_cpu_32(IPv4(192,168,1,(i+5)&0xff));
+			constantHeaders[i].ip.dst_addr=rte_be_to_cpu_32(IPv4(192,168,0,i%254+1));
+			constantHeaders[i].ip.src_addr=rte_be_to_cpu_32(IPv4(192,168,1,i%254+1));
 			constantHeaders[i].ip.version_ihl=0x45;
 			constantHeaders[i].ip.type_of_service=0x05;
 			constantHeaders[i].ip.total_length=rte_be_to_cpu_16(len);
