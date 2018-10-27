@@ -142,14 +142,17 @@ struct l2fwd_port_statistics {
 struct l2fwd_port_statistics port_statistics[RTE_MAX_ETHPORTS];
 
 
-/* 
+/* //////////////////////////////////////////////////////////////////////////////
+ *
  * RTPGEN specified varibles
- */
+ * 
+ *///////////////////////////////////////////////////////////////////////////////
 
+#define RTPGEN_MAXFILENAME 256
 #define RTPGEN_RTP_MAX_SESSIONS 50000
 #define RTPGEN_RTP_TX_INTERVAL_US 20000 /* TX rtp packet every ~20ms = ~20000us */
-#define RTPGEN_RTP_PAYLOAD_MAX_LEN 20000
 #define RTPGEN_RTP_PAYLOAD_LEN 160
+#define RTPGEN_RTP_PAYLOAD_MAX_LEN RTPGEN_RTP_PAYLOAD_LEN * 50 * 30
 
 struct rtpgen_rtp_hdr {
         uint16_t flags;
@@ -170,15 +173,28 @@ struct rtpgen_rtp_config {
 	uint32_t rtp_ssrc;
 };
 
+typedef struct rtpgen_ethIpUdpHdr_s {
+	struct ether_hdr eth;
+	struct ipv4_hdr ip;
+	struct udp_hdr udp;
+} rtpgen_ethIpUdpHdr_t __attribute__((__packed__));
+
+rtpgen_ethIpUdpHdr_t constantHeaders[RTPGEN_RTP_MAX_SESSIONS];
+
 struct rtpgen_rtp_config *rtp_configs_per_port[RTE_MAX_ETHPORTS];
 
 static unsigned int rtpgen_sessions = 1;
 static unsigned int rtpgen_payload_data_len = RTPGEN_RTP_PAYLOAD_LEN;
-static uint8_t rtpgen_payload_data[RTPGEN_RTP_PAYLOAD_MAX_LEN];
+// メモリコピーを行うため。循環時にオーバフローしないようにRTPパケットサイズ分だけ追加
+static uint8_t rtpgen_payload_data[RTPGEN_RTP_PAYLOAD_MAX_LEN + RTPGEN_RTP_PAYLOAD_LEN];
 
-/* 
+static char rtpgen_payload_filename[RTPGEN_MAXFILENAME];
+
+/* //////////////////////////////////////////////////////////////////////////////
+ *
  * RTPGEN specified varibles end
- */
+ *
+ *///////////////////////////////////////////////////////////////////////////////
 
 #define MAX_TIMER_PERIOD 86400 /* 1 day max */
 /* A tsc-based timer responsible for triggering statistics printout */
@@ -230,57 +246,13 @@ print_stats(void)
 	printf("\n====================================================\n");
 }
 
-/* ether/ipv4/udpの追加 */
-static struct rte_mbuf *
-rtpgen_prepend_headers(struct rte_mbuf *m, uint16_t portid, uint16_t sessionid){
-
-	struct ether_hdr *eth;
-	struct ipv4_hdr *ip;
-	struct udp_hdr *udp;
-	uint16_t len;
-	struct rtpgen_rtp_config *rtp_conf;
-
-	rtp_conf=rtp_configs_per_port[portid];
-
-	len=m->data_len;
-	// init UDP headers;
-	udp=(struct udp_hdr *)rte_pktmbuf_prepend(m,sizeof(struct udp_hdr));
-	udp->src_port=rtp_conf[sessionid].udp_s_port;
-	udp->dst_port=rtp_conf[sessionid].udp_d_port;
-	udp->dgram_len=rte_be_to_cpu_16(len+sizeof(struct udp_hdr));
-	udp->dgram_cksum=0;
-
-	len=m->pkt_len;
-	// init IP headers;
-	ip=(struct ipv4_hdr *)rte_pktmbuf_prepend(m,sizeof(struct ipv4_hdr));
-	ip->version_ihl=0x45;
-	ip->type_of_service=0x05;
-	ip->total_length=rte_be_to_cpu_16(len+sizeof(struct ipv4_hdr));
-	ip->packet_id=0;
-	ip->fragment_offset=rte_be_to_cpu_16(0x4000);
-	ip->time_to_live=64;
-	ip->next_proto_id=17;
-	ip->hdr_checksum=0;
-	ip->src_addr=rtp_conf[sessionid].ip_s_addr;
-	ip->dst_addr=rtp_conf[sessionid].ip_d_addr;
-
-	// init Ether headers;
-	// mac-addr-copying
-	eth=(struct ether_hdr *)rte_pktmbuf_prepend(m,sizeof(struct ether_hdr));
-	ether_addr_copy(&l2fwd_ports_eth_peer_addr[portid], &eth->d_addr);
-	ether_addr_copy(&l2fwd_ports_eth_addr[portid], &eth->s_addr);
-	eth->ether_type = rte_be_to_cpu_16(ETHER_TYPE_IPv4);
-	
-	return m;
-}
-
 // 送信タイミングでのpacketの生成
 static struct rte_mbuf *
 rtpgen_create_newpacket(uint16_t portid, uint16_t sessionid){
 	struct rtpgen_rtp_hdr *rtp;
 	struct rte_mbuf *m;
 	uint8_t *payload;
-	unsigned i, payload_idx;
+	unsigned payload_idx;
 	uint8_t rtp_version;
 	uint8_t rtp_padding;
 	uint8_t rtp_extention;
@@ -293,9 +265,15 @@ rtpgen_create_newpacket(uint16_t portid, uint16_t sessionid){
 
 	// create mbuf as m
 	m=rte_pktmbuf_alloc(l2fwd_pktmbuf_pool);
+        rte_memcpy((uint8_t *)m->buf_addr + m->data_off,
+                   (uint8_t *)&(constantHeaders[sessionid]), sizeof(rtpgen_ethIpUdpHdr_t));
+	m->data_len=sizeof(rtpgen_ethIpUdpHdr_t);
+	m->pkt_len =sizeof(rtpgen_ethIpUdpHdr_t);
+
+	rtp=(struct rtpgen_rtp_hdr *)rte_pktmbuf_append(m,sizeof(struct rtpgen_rtp_hdr));
 
 	// add RTP headers;
-	rtp=rte_pktmbuf_mtod(m,struct rtpgen_rtp_hdr *);
+	//rtp=rte_pktmbuf_mtod(m,struct rtpgen_rtp_hdr *);
 	rtp_version=2;
 	rtp_padding=0;
 	rtp_extention=0;
@@ -312,26 +290,22 @@ rtpgen_create_newpacket(uint16_t portid, uint16_t sessionid){
 	rtp->timestamp=rte_be_to_cpu_32(rtp_conf[sessionid].rtp_timestamp);
 	rtp->ssrc     =rte_be_to_cpu_32(rtp_conf[sessionid].rtp_ssrc);
 
-	m->pkt_len =sizeof(struct rtpgen_rtp_hdr);
-	m->data_len=sizeof(struct rtpgen_rtp_hdr);
+	//m->pkt_len =sizeof(struct rtpgen_rtp_hdr);
+	//m->data_len=sizeof(struct rtpgen_rtp_hdr);
 
 	// append Payload data;
 	payload=(uint8_t *)rte_pktmbuf_append(m,sizeof(uint8_t)*RTPGEN_RTP_PAYLOAD_LEN);
 	payload_idx=rtp_conf[sessionid].rtp_sequence;
 	payload_idx*=RTPGEN_RTP_PAYLOAD_LEN;
-	payload_idx%=RTPGEN_RTP_PAYLOAD_LEN;
-	payload=rtpgen_payload_data+payload_idx;
+	payload_idx%=rtpgen_payload_data_len;
 
-	for(i=0;i<RTPGEN_RTP_PAYLOAD_LEN;i++){
-	//	payload[i]=rtpgen_payload_data[payload_idx];
-	//	printf("%d : %X\n",i,rtpgen_payload_data[i]);
-		printf("%d : %X\n",i,payload[i]);
-	}
+        rte_memcpy((uint8_t *)payload,
+                   (uint8_t *)&(rtpgen_payload_data)+payload_idx, RTPGEN_RTP_PAYLOAD_LEN);
 
 	rtp_conf[sessionid].rtp_timestamp+=RTPGEN_RTP_PAYLOAD_LEN;
 	rtp_conf[sessionid].rtp_sequence+=1;
 
-	m=rtpgen_prepend_headers(m, portid, sessionid);
+	//m=rtpgen_prepend_headers(m, portid, sessionid);
 
 	return m;
 }
@@ -356,13 +330,56 @@ rtpgen_send_packet(struct rte_mbuf *m, unsigned portid)
 /* RTPペイロードデータのよみこみ */
 static void
 rtpgen_set_payload_data(void){
-	unsigned i;
+	FILE *fp;
+	unsigned i, size;
+
 	// data flush
-	rtpgen_payload_data_len++;
 	memset(rtpgen_payload_data, 0, sizeof(char)*RTPGEN_RTP_PAYLOAD_MAX_LEN);
 
-	for(i=0; i<rtpgen_payload_data_len; i++){
-		rtpgen_payload_data[i]=(0x00+i)&0x0000ff;
+	//rtpgen_payload_data={
+	uint8_t default_data[]={
+			0x9f,0xff,0x8b,0x91,0x86,0x87,0x8b,0x87, // 8
+			0x9f,0x91,0x1f,0x7f,0x0b,0x11,0x06,0x07, // 16
+			0x0b,0x07,0x1f,0x11,0x9f,0x7e,0x8b,0x91, // 24
+			0x86,0x87,0x8b,0x87,0x9f,0x91,0x1f,0xff, // 32
+			0x0b,0x11,0x06,0x07,0x0b,0x07,0x1f,0x11, // 40
+			0x9f,0x7f,0x8b,0x91,0x86,0x87,0x8b,0x87, // 48
+			0x9f,0x91,0x1f,0x7f,0x0b,0x11,0x06,0x07, // 56
+			0x0b,0x07,0x1f,0x11,0x9f,0x7f,0x8b,0x91, // 64
+			0x86,0x87,0x8b,0x87,0x9f,0x91,0x1f,0xff, // 72
+			0x0b,0x11,0x06,0x07,0x0b,0x07,0x1f,0x11, // 80
+			0x9f,0x7f,0x8b,0x91,0x86,0x87,0x8b,0x87, // 88
+			0x9f,0x91,0x1f,0x7f,0x0b,0x11,0x06,0x07, // 96
+			0x0b,0x07,0x1f,0x11,0x9f,0xff,0x8b,0x91, // 104
+			0x86,0x87,0x8b,0x87,0x9f,0x91,0x1f,0xff, // 112
+			0x0b,0x11,0x06,0x07,0x0b,0x07,0x1f,0x11, // 120
+			0x9f,0xff,0x8b,0x91,0x86,0x87,0x8b,0x87, // 128
+			0x9f,0x91,0x1f,0x7f,0x0b,0x11,0x06,0x07, // 136
+			0x0b,0x07,0x1f,0x11,0x9f,0xff,0x8b,0x91, // 144
+			0x86,0x87,0x8b,0x87,0x9f,0x91,0x1f,0xff, // 152
+			0x0b,0x11,0x06,0x07,0x0b,0x07,0x1f,0x11	 // 160
+		};
+	for(i=0;i<RTPGEN_RTP_PAYLOAD_LEN+RTPGEN_RTP_PAYLOAD_LEN;i++){
+		rtpgen_payload_data[i]=default_data[i%RTPGEN_RTP_PAYLOAD_LEN];
+	}
+	rtpgen_payload_data_len=RTPGEN_RTP_PAYLOAD_LEN;
+
+	if ( strcmp(rtpgen_payload_filename, "")!= 0) {
+		fp=fopen(rtpgen_payload_filename, "rb");
+		if(fp!=NULL){
+			size=fread(&rtpgen_payload_data, sizeof(uint8_t), RTPGEN_RTP_PAYLOAD_MAX_LEN, fp);
+			if(size==0)
+				return;
+			rtpgen_payload_data_len=size;
+
+			for(i=0;i<RTPGEN_RTP_PAYLOAD_LEN;i++)
+				rtpgen_payload_data[rtpgen_payload_data_len+i]=rtpgen_payload_data[i];
+			
+			fclose(fp);
+			printf("loaded from %s\n", rtpgen_payload_filename);
+		}else{
+			printf("invalid filename - payload data, use default setting\n");
+		}
 	}
 }
 
@@ -595,11 +612,19 @@ rtpgen_parse_timer_period(const char *q_arg)
 	return n;
 }
 
+static void
+rtpgen_parse_filename(const char *q_arg, char *filename)
+{
+	strcpy(filename, q_arg);
+}
+
+
 static const char short_options[] =
 	"p:"  /* portmask */
 	"q:"  /* number of queues */
 	"T:"  /* timer period */
 	"s:"  /* number of sessions */
+	"f:"  /* payload data use file */
 	;
 
 enum {
@@ -661,6 +686,16 @@ rtpgen_parse_args(int argc, char **argv)
 			rtpgen_sessions = rtpgen_parse_nsesisons(optarg);
 			if (rtpgen_sessions == 0) {
 				printf("invalid session number\n");
+				rtpgen_usage(prgname);
+				return -1;
+			}
+			break;
+
+		/* payload data */
+		case 'f':
+			rtpgen_parse_filename(optarg, rtpgen_payload_filename);
+			if ( strcmp(rtpgen_payload_filename, "")== 0) {
+				printf("invalid filename\n");
 				rtpgen_usage(prgname);
 				return -1;
 			}
@@ -790,7 +825,7 @@ main(int argc, char **argv)
 	uint16_t nb_ports;
 	uint16_t nb_ports_available;
 	uint16_t portid, last_port;
-	unsigned i;
+	unsigned i, len;
 	unsigned lcore_id, rx_lcore_id;
 	unsigned nb_ports_in_mask = 0;
 	struct rtpgen_rtp_config *tmp_set;
@@ -899,6 +934,9 @@ main(int argc, char **argv)
 		qconf->n_rx_port++;
 		printf("Lcore %u: RX port %u\n", rx_lcore_id, portid);
 	}
+
+	/* RTPペイロードのデータを初期化 */
+	rtpgen_set_payload_data();
 
 	nb_ports_available = nb_ports;
 
@@ -1040,10 +1078,32 @@ main(int argc, char **argv)
 			tmp_set[i].rtp_timestamp=0;
 			tmp_set[i].rtp_sequence=0;
 			tmp_set[i].rtp_ssrc=rand();
+			
+			len=RTPGEN_RTP_PAYLOAD_LEN + sizeof(struct rtpgen_rtp_hdr);
+
+			len+=sizeof(struct udp_hdr);
+			constantHeaders[i].udp.src_port=rte_be_to_cpu_16(6000+1000*portid+i);
+                        constantHeaders[i].udp.dst_port=rte_be_to_cpu_16(8000+1000*portid+i);
+                        constantHeaders[i].udp.dgram_len=rte_be_to_cpu_16(len);
+                        constantHeaders[i].udp.dgram_cksum=0;
+
+			len+=sizeof(struct ipv4_hdr);
+			constantHeaders[i].ip.dst_addr=rte_be_to_cpu_32(IPv4(192,168,0,(i+5)&0xff));
+			constantHeaders[i].ip.src_addr=rte_be_to_cpu_32(IPv4(192,168,1,(i+5)&0xff));
+			constantHeaders[i].ip.version_ihl=0x45;
+			constantHeaders[i].ip.type_of_service=0x05;
+			constantHeaders[i].ip.total_length=rte_be_to_cpu_16(len);
+			constantHeaders[i].ip.packet_id=0;                                               			
+			constantHeaders[i].ip.fragment_offset=rte_be_to_cpu_16(0x4000);                  			
+			constantHeaders[i].ip.time_to_live=64;                                           			
+			constantHeaders[i].ip.next_proto_id=17;                                          			
+			constantHeaders[i].ip.hdr_checksum=0;
+
+			ether_addr_copy(&l2fwd_ports_eth_peer_addr[portid], &(constantHeaders[i].eth.d_addr));
+			ether_addr_copy(&l2fwd_ports_eth_addr[portid], &(constantHeaders[i].eth.s_addr));
+			constantHeaders[i].eth.ether_type = rte_be_to_cpu_16(ETHER_TYPE_IPv4);
 		}
 
-		/* RTPペイロードのデータを初期化 */
-		rtpgen_set_payload_data();
 
 		/* Start device */
 		// https://doc.dpdk.org/api/rte__ethdev_8h.html#afdc834c1c52e9fb512301990468ca7c2
