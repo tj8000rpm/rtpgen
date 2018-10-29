@@ -76,11 +76,11 @@ static volatile bool force_quit;
 #define RTE_LOGTYPE_RTPGEN RTE_LOGTYPE_USER1
 
 //#define NB_MBUF   8192
-#define NB_MBUF   8192
+#define NB_MBUF   8192*7
 
 //#define MAX_PKT_BURST 32
 #define MAX_PKT_BURST 512
-#define BURST_TX_DRAIN_US 5 /* TX drain every ~5us */
+#define BURST_TX_DRAIN_US 10 /* TX drain every ~5us */
 #define MEMPOOL_CACHE_SIZE 256
 
 /*
@@ -581,7 +581,7 @@ rtpgen_parse_nsesisons(const char *q_arg)
 		return 0;
 	if (n == 0)
 		return 0;
-	if (n >= RTPGEN_RTP_MAX_SESSIONS)
+	if (n > RTPGEN_RTP_MAX_SESSIONS)
 		return 0;
 
 	return n;
