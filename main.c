@@ -243,7 +243,7 @@ print_stats(void)
 }
 
 // 送信タイミングでのpacketの生成
-static void
+static unsigned
 rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts, unsigned count){
 	struct rtpgen_rtp_hdr *rtp;
 	struct rte_mbuf *m;
@@ -255,12 +255,15 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts, unsigned count){
 	uint8_t rtp_ccrc_count;
 	uint8_t rtp_marker;
 	uint8_t rtp_payload_type;
-	unsigned sessionid;
+	unsigned sessionid, i;
 	struct rtpgen_rtp_config *rtp_conf;
 	
 	rtp_conf=rtp_configs_per_port[portid];
 	
-	for(sessionid=0;sessionid<count;sessionid++){
+	for(i=0,sessionid=0;i<rtpgen_sessions;i++){
+		/* bulk_allocで確保した領域を超えないように */
+		if(!rtp_conf[i].enabled || sessionid > count)
+			continue;
 		m=pkts[sessionid];
         	rte_memcpy((uint8_t *)m->buf_addr + m->data_off,
         	           (uint8_t *)&(constantHeaders[sessionid]), sizeof(rtpgen_ethIpUdpHdr_t));
@@ -297,7 +300,16 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts, unsigned count){
 
 		rtp_conf[sessionid].rtp_timestamp+=RTPGEN_RTP_PAYLOAD_LEN;
 		rtp_conf[sessionid].rtp_sequence+=1;
+		sessionid++;
 	}
+	/* 
+         * パケット生成途中にあるリソースがdisableになった場合のメモリリーク対策
+         * ホンマに効果あるかは微妙・・・？
+         */
+	for(i=sessionid;i<count;i++)
+		rte_pktmbuf_free(pkts[i]);
+	
+	return sessionid;
 }
 
 /* RTPペイロードデータのよみこみ */
@@ -361,10 +373,11 @@ static void
 rtpgen_main_loop(void){
 	int sent;
 	unsigned lcore_id;
+	unsigned int rtpgen_active_sessions = 0;
 	uint64_t prev_tsc, diff_tsc, cur_tsc, timer_tsc;
 	uint64_t rtpgen_rtp_timer_tsc,
-		 rtpgen_prev_tsc;//, rtpgen_diff_tsc;
-	unsigned i, portid, sessionid, cur_sessionid;//, generated;
+		 rtpgen_prev_tsc;
+	unsigned i, j, portid, sessionid, cur_sessionid;
 	struct lcore_queue_conf *qconf;
 
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
@@ -482,10 +495,14 @@ rtpgen_main_loop(void){
 					// rxqueueのport_idを取得
 					portid = qconf->rx_port_list[i];
 					if(cur_sessionid == 0){
-						if(rte_pktmbuf_alloc_bulk(l2fwd_pktmbuf_pool, tx_bursts, rtpgen_sessions)!=0)
+						rtpgen_active_sessions=0;
+						for(j=0;j<rtpgen_sessions;j++)
+							if(rtp_configs_per_port[portid][j].enabled)
+								rtpgen_active_sessions++;
+						if(rte_pktmbuf_alloc_bulk(l2fwd_pktmbuf_pool, tx_bursts, rtpgen_active_sessions)!=0)
 							continue;
 						rtpgen_prev_tsc=cur_tsc;
-						rtpgen_setup_newpacket(portid, tx_bursts, rtpgen_sessions);
+						rtpgen_active_sessions=rtpgen_setup_newpacket(portid, tx_bursts, rtpgen_active_sessions);
 					}
 				
 					for (sessionid=cur_sessionid;
@@ -530,7 +547,7 @@ rtpgen_usage(const char *prgname)
 	       "  -q NQ: number of queue (=ports) per lcore (default is 1)\n"
 	       "  -T PERIOD: statistics will be refreshed each PERIOD seconds (0 to disable, 10 default, 86400 maximum)\n"
 	       "  -s SESSIONS: number of rtp sessions\n"
-	       "  -b BUFFER: number of mbuf pool size\n"
+	       "  -b BUFFER: number of mbuf pool size(8192 default, 57344 maximum)\n"
 	       "  -f FILE: select rtp payload file(expected no header rtp file)\n",
 	       prgname);
 }
