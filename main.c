@@ -75,8 +75,8 @@ static volatile bool force_quit;
 
 #define RTE_LOGTYPE_RTPGEN RTE_LOGTYPE_USER1
 
-//#define NB_MBUF   8192
-#define NB_MBUF   8192*7
+#define NB_MBUF   8192
+#define MAX_NB_MBUF 57344
 
 //#define MAX_PKT_BURST 32
 #define MAX_PKT_BURST 512
@@ -183,6 +183,8 @@ static unsigned int rtpgen_payload_data_len = RTPGEN_RTP_PAYLOAD_LEN;
 static uint8_t rtpgen_payload_data[RTPGEN_RTP_PAYLOAD_MAX_LEN + RTPGEN_RTP_PAYLOAD_LEN];
 
 static char rtpgen_payload_filename[RTPGEN_MAXFILENAME];
+
+static unsigned int n_mbuf_pool = NB_MBUF;
 
 /* //////////////////////////////////////////////////////////////////////////////
  *
@@ -526,11 +528,10 @@ rtpgen_usage(const char *prgname)
 	printf("%s [EAL options] -- -p PORTMASK [-q NQ]\n"
 	       "  -p PORTMASK: hexadecimal bitmask of ports to configure\n"
 	       "  -q NQ: number of queue (=ports) per lcore (default is 1)\n"
-		   "  -T PERIOD: statistics will be refreshed each PERIOD seconds (0 to disable, 10 default, 86400 maximum)\n"
-		   "  --[no-]mac-updating: Enable or disable MAC addresses updating (enabled by default)\n"
-		   "      When enabled:\n"
-		   "       - The source MAC address is replaced by the TX port MAC address\n"
-		   "       - The destination MAC address is replaced by 02:00:00:00:00:TX_PORT_ID\n",
+	       "  -T PERIOD: statistics will be refreshed each PERIOD seconds (0 to disable, 10 default, 86400 maximum)\n"
+	       "  -s SESSIONS: number of rtp sessions\n"
+	       "  -b BUFFER: number of mbuf pool size\n"
+	       "  -f FILE: select rtp payload file(expected no header rtp file)\n",
 	       prgname);
 }
 
@@ -564,6 +565,24 @@ rtpgen_parse_nqueue(const char *q_arg)
 	if (n == 0)
 		return 0;
 	if (n >= MAX_RX_QUEUE_PER_LCORE)
+		return 0;
+
+	return n;
+}
+
+static unsigned int
+rtpgen_parse_nmbufpool(const char *q_arg)
+{
+	char *end = NULL;
+	unsigned long n;
+
+	/* parse hexadecimal string */
+	n = strtoul(q_arg, &end, 10);
+	if ((q_arg[0] == '\0') || (end == NULL) || (*end != '\0'))
+		return 0;
+	if (n == 0)
+		return 0;
+	if (n > MAX_NB_MBUF)
 		return 0;
 
 	return n;
@@ -616,6 +635,7 @@ static const char short_options[] =
 	"T:"  /* timer period */
 	"s:"  /* number of sessions */
 	"f:"  /* payload data use file */
+	"b:"  /* number of mbuf pool */
 	;
 
 enum {
@@ -670,6 +690,16 @@ rtpgen_parse_args(int argc, char **argv)
 				return -1;
 			}
 			timer_period = timer_secs;
+			break;
+
+		/* number of mbuf pool */
+		case 'b':
+			n_mbuf_pool = rtpgen_parse_nmbufpool(optarg);
+			if (rtpgen_sessions == 0) {
+				printf("invalid mbuf pool size\n");
+				rtpgen_usage(prgname);
+				return -1;
+			}
 			break;
 
 		/* number of sessions */
@@ -855,7 +885,9 @@ main(int argc, char **argv)
 	//   （受信したパケットを配置するための）メモリプールを確保して、
 	//   プールのポインタを返す
 	//   from NTT-Nakamuraさんのスライドから
-	l2fwd_pktmbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", NB_MBUF,
+	//l2fwd_pktmbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", NB_MBUF,
+	printf("--- %d\n",(unsigned)(rtpgen_sessions*1.15));
+	l2fwd_pktmbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", 512,
 		MEMPOOL_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE,
 		rte_socket_id());
 	
