@@ -1,8 +1,7 @@
 /*-
  *   BSD LICENSE
  *
- *   Copyright(c) 2010-2016 Intel Corporation. All rights reserved.
- *   All rights reserved.
+ *   Based on l2fwd sample
  *
  *   Redistribution and use in source and binary forms, with or without
  *   modification, are permitted provided that the following conditions
@@ -77,20 +76,17 @@ static volatile bool force_quit;
 #define RTE_LOGTYPE_RTPGEN RTE_LOGTYPE_USER1
 
 //#define NB_MBUF   8192
-#define NB_MBUF   8192*2
+#define NB_MBUF   8192
 
 //#define MAX_PKT_BURST 32
 #define MAX_PKT_BURST 512
-//#define BURST_TX_DRAIN_US 10 /* TX drain every ~10us */
-#define BURST_TX_DRAIN_US 20 /* TX drain every ~20us */
+#define BURST_TX_DRAIN_US 5 /* TX drain every ~5us */
 #define MEMPOOL_CACHE_SIZE 256
 
 /*
  * Configurable number of RX/TX ring descriptors
  */
 #define RTE_TEST_RX_DESC_DEFAULT 128
-//#define RTE_TEST_TX_DESC_DEFAULT 512
-//#define RTE_TEST_TX_DESC_DEFAULT 2048
 #define RTE_TEST_TX_DESC_DEFAULT 4096
 
 static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
@@ -272,7 +268,6 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts, unsigned count){
 		rtp=(struct rtpgen_rtp_hdr *)rte_pktmbuf_append(m,sizeof(struct rtpgen_rtp_hdr));
 
 		// add RTP headers;
-		//rtp=rte_pktmbuf_mtod(m,struct rtpgen_rtp_hdr *);
 		rtp_version=2;
 		rtp_padding=0;
 		rtp_extention=0;
@@ -302,100 +297,6 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts, unsigned count){
 		rtp_conf[sessionid].rtp_sequence+=1;
 	}
 }
-
-// 送信タイミングでのpacketの生成
-static struct rte_mbuf *
-rtpgen_create_newpacket(uint16_t portid, uint16_t sessionid){
-	struct rtpgen_rtp_hdr *rtp;
-	struct rte_mbuf *m;
-	uint8_t *payload;
-	unsigned payload_idx;
-	uint8_t rtp_version;
-	uint8_t rtp_padding;
-	uint8_t rtp_extention;
-	uint8_t rtp_ccrc_count;
-	uint8_t rtp_marker;
-	uint8_t rtp_payload_type;
-	struct rtpgen_rtp_config *rtp_conf;
-	
-	rtp_conf=rtp_configs_per_port[portid];
-
-	// create mbuf as m
-	m=rte_pktmbuf_alloc(l2fwd_pktmbuf_pool);
-        rte_memcpy((uint8_t *)m->buf_addr + m->data_off,
-                   (uint8_t *)&(constantHeaders[sessionid]), sizeof(rtpgen_ethIpUdpHdr_t));
-	m->data_len=sizeof(rtpgen_ethIpUdpHdr_t);
-	m->pkt_len =sizeof(rtpgen_ethIpUdpHdr_t);
-
-	rtp=(struct rtpgen_rtp_hdr *)rte_pktmbuf_append(m,sizeof(struct rtpgen_rtp_hdr));
-
-	// add RTP headers;
-	//rtp=rte_pktmbuf_mtod(m,struct rtpgen_rtp_hdr *);
-	rtp_version=2;
-	rtp_padding=0;
-	rtp_extention=0;
-	rtp_ccrc_count=0;
-	rtp_marker=0;
-	rtp_payload_type=0;
-	rtp->flags=rte_be_to_cpu_16((rtp_version     &0x3 ) << 14 |
-	                            (rtp_padding     &0x1 ) << 13 |
-	                            (rtp_extention   &0x1 ) << 12 |
-	                            (rtp_ccrc_count  &0xf ) <<  8 |
-	                            (rtp_marker      &0x1 ) <<  7 |
-	                            (rtp_payload_type&0x7f)        );
-	rtp->sequence =rte_be_to_cpu_16(rtp_conf[sessionid].rtp_sequence);
-	rtp->timestamp=rte_be_to_cpu_32(rtp_conf[sessionid].rtp_timestamp);
-	rtp->ssrc     =rte_be_to_cpu_32(rtp_conf[sessionid].rtp_ssrc);
-
-	//m->pkt_len =sizeof(struct rtpgen_rtp_hdr);
-	//m->data_len=sizeof(struct rtpgen_rtp_hdr);
-
-	// append Payload data;
-	payload=(uint8_t *)rte_pktmbuf_append(m,sizeof(uint8_t)*RTPGEN_RTP_PAYLOAD_LEN);
-	payload_idx=rtp_conf[sessionid].rtp_sequence;
-	payload_idx*=RTPGEN_RTP_PAYLOAD_LEN;
-	payload_idx%=rtpgen_payload_data_len;
-
-        rte_memcpy((uint8_t *)payload,
-                   (uint8_t *)&(rtpgen_payload_data)+payload_idx, RTPGEN_RTP_PAYLOAD_LEN);
-
-	rtp_conf[sessionid].rtp_timestamp+=RTPGEN_RTP_PAYLOAD_LEN;
-	rtp_conf[sessionid].rtp_sequence+=1;
-
-	//m=rtpgen_prepend_headers(m, portid, sessionid);
-
-	return m;
-}
-
-// packetの生成
-/*
-static void
-rtpgen_send_packet(struct rte_mbuf *m, unsigned portid)
-{
-	int sent;
-	struct rte_eth_dev_tx_buffer *buffer;
-
-	// 送信ポートのバッファを取得。
-	buffer = tx_buffer[portid];
-	sent = rte_eth_tx_buffer(portid, 0, buffer, m);
-	// うまいこと言ったらsentに送信パケット数書いておわり。
-	if (sent){
-		port_statistics[portid].tx += sent;
-		//force_quit=true;
-	}
-}*/
-
-/*
-void origcb(struct rte_mbuf ** 	pkts, uint16_t 	unsent, void * 	userdata ){
-	struct rte_mbuf *m;
-	int i=0;
-	for(i=0;i<unsent;i++){
-		m=pkts[i];
-		printf("unsented-data!!!!!!\n");
-		rte_pktmbuf_dump(stdout, m, m->data_len);
-	}
-}
-*/
 
 /* RTPペイロードデータのよみこみ */
 static void
@@ -520,8 +421,7 @@ rtpgen_main_loop(void){
 		diff_tsc = cur_tsc - prev_tsc;
 
 		// unlikelyはマクロ関数
-		// CPUにこの条件式がだいたい成立しないことを支持するため。
-		// へーーー
+		// CPUにこの条件式がだいたい成立しないことを指示するため。
 		//
 		// すなわちこのサイクルがドレイン時間(10us)を超えた場合の処理
 		// と、最初の１回めの処理。
@@ -551,7 +451,7 @@ rtpgen_main_loop(void){
 			// timer_period default=10, 
 			// すなわち何かしら設定があれば必ずチェック
 			//
-			// で、n秒に一回statsを更新するための処理なわけだ。
+			// で、n秒に一回statsを更新するための処理なわけ。
 			if (timer_period > 0) {
 
 				/* advance the timer */
@@ -601,61 +501,10 @@ rtpgen_main_loop(void){
 					}
 				}
 			}
-/*
-			if (unlikely( rtpgen_rtp_timer_tsc >= rtpgen_rtp_tx_tsc )){
-				for (i = 0; i < qconf->n_rx_port; i++) {
-					// rxqueueのport_idを取得
-					portid = qconf->rx_port_list[i];
-					for (sessionid=0; sessionid<rtpgen_sessions; sessionid++){
-						rtpgen_send_packet(
-							rtpgen_create_newpacket(portid, sessionid),
-							portid);
-					}
-
-					rtpgen_rtp_timer_tsc=0;
-				}
-			}
-*/
-/*
-			if (unlikely( rtpgen_rtp_timer_tsc >= rtpgen_rtp_tx_tsc )){
-				if(cur_sessionid == 0){
-					rtpgen_prev_tsc=cur_tsc;
-					for (sessionid=0; sessionid<rtpgen_sessions; sessionid++){
-						//rtpgen_send_packet(
-						//	rtpgen_create_newpacket(portid, sessionid),
-						//	portid);
-						tx_bursts[sessionid]=rtpgen_create_newpacket(portid, sessionid);
-					}
-				}
-				
-				for (i = 0; i < qconf->n_rx_port; i++) {
-					// rxqueueのport_idを取得
-					portid = qconf->rx_port_list[i];
-					sent = rte_eth_tx_burst(portid, 0, tx_bursts+cur_sessionid, rtpgen_sessions-cur_sessionid);
-					if(sent)
-				 		port_statistics[portid].tx += sent;
-
-					for (sessionid=cur_sessionid; sessionid<cur_sessionid+sent; sessionid++){
-						rte_pktmbuf_free(tx_bursts[sessionid]);
-					}
-
-					cur_sessionid+=sent;
-
-					if(cur_sessionid >= rtpgen_sessions){
-						rtpgen_rtp_timer_tsc=cur_tsc-rtpgen_prev_tsc;
-						cur_sessionid=0;
-					}
-
-				}
-			}
-*/
 
 			// tscの今回値を前回値に更新
 			prev_tsc = cur_tsc;
 		}
-
-
-		//}
 
 	}
 }
