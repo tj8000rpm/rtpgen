@@ -47,6 +47,10 @@
 #include <stdbool.h>
 #include <time.h>
 
+#include <sys/socket.h>
+#include <unistd.h>
+#include <fcntl.h>
+
 #include <rte_common.h>
 #include <rte_log.h>
 #include <rte_malloc.h>
@@ -70,6 +74,8 @@
 #include <rte_mempool.h>
 #include <rte_mbuf.h>
 #include <rte_byteorder.h>
+
+#include "ipc_pack.pb-c.h"
 
 static volatile bool force_quit;
 
@@ -153,15 +159,19 @@ struct l2fwd_port_statistics port_statistics[RTE_MAX_ETHPORTS];
 #define RTPGEN_RTP_PAYLOAD_MAX_LEN RTPGEN_RTP_PAYLOAD_LEN * 50 * 30
 
 struct rtpgen_rtp_hdr {
-        uint16_t flags;
-        uint16_t sequence;
-        uint32_t timestamp;
-        uint32_t ssrc;
+	uint16_t flags;
+	uint16_t sequence;
+	uint32_t timestamp;
+	uint32_t ssrc;
 } __attribute__((__packed__));
 
 struct rtpgen_rtp_config {
 	bool enabled;
 	uint8_t portid;
+	uint32_t ip_dst_addr;
+	uint32_t ip_src_addr;
+	uint16_t udp_dst_port;
+	uint16_t udp_src_port;
 	uint32_t rtp_timestamp;
 	uint32_t rtp_sequence;
 	uint32_t rtp_ssrc;
@@ -173,8 +183,8 @@ typedef struct rtpgen_ethIpUdpHdr_s {
 	struct udp_hdr udp;
 } rtpgen_ethIpUdpHdr_t __attribute__((__packed__));
 
-rtpgen_ethIpUdpHdr_t constantHeaders[RTPGEN_RTP_MAX_SESSIONS];
-
+//rtpgen_ethIpUdpHdr_t constantHeaders[RTPGEN_RTP_MAX_SESSIONS];
+rtpgen_ethIpUdpHdr_t *constantHeaders[RTE_MAX_ETHPORTS];
 struct rtpgen_rtp_config *rtp_configs_per_port[RTE_MAX_ETHPORTS];
 
 static unsigned int rtpgen_sessions = 1;
@@ -186,6 +196,21 @@ static char rtpgen_payload_filename[RTPGEN_MAXFILENAME];
 
 static unsigned int n_mbuf_pool = NB_MBUF;
 
+int pt_th=0;
+pthread_t *p_socket_main_thread=NULL;
+pthread_t socket_main_thread;
+pthread_t *p_sub_socket_thread=NULL;
+pthread_t sub_socket_thread;
+
+struct socket_info{
+    int sock;
+	int ssock;
+};
+
+
+void enabling_message(RtpgenIPCmsgV1*, RtpgenIPCmsgV1*);
+void thread_loop(struct socket_info*);
+void subthread_loop(int*);
 /* //////////////////////////////////////////////////////////////////////////////
  *
  * RTPGEN specified varibles end
@@ -265,8 +290,8 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts, unsigned count){
 		if(!rtp_conf[i].enabled || sessionid > count)
 			continue;
 		m=pkts[sessionid];
-        	rte_memcpy((uint8_t *)m->buf_addr + m->data_off,
-        	           (uint8_t *)&(constantHeaders[sessionid]), sizeof(rtpgen_ethIpUdpHdr_t));
+		rte_memcpy((uint8_t *)m->buf_addr + m->data_off,
+			   (uint8_t *)&(constantHeaders[portid][i]), sizeof(rtpgen_ethIpUdpHdr_t));
 		m->data_len=sizeof(rtpgen_ethIpUdpHdr_t);
 		m->pkt_len =sizeof(rtpgen_ethIpUdpHdr_t);
 
@@ -285,27 +310,27 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts, unsigned count){
 		                            (rtp_ccrc_count  &0xf ) <<  8 |
 		                            (rtp_marker      &0x1 ) <<  7 |
 		                            (rtp_payload_type&0x7f)        );
-		rtp->sequence =rte_be_to_cpu_16(rtp_conf[sessionid].rtp_sequence);
-		rtp->timestamp=rte_be_to_cpu_32(rtp_conf[sessionid].rtp_timestamp);
-		rtp->ssrc     =rte_be_to_cpu_32(rtp_conf[sessionid].rtp_ssrc);
+		rtp->sequence =rte_be_to_cpu_16(rtp_conf[i].rtp_sequence);
+		rtp->timestamp=rte_be_to_cpu_32(rtp_conf[i].rtp_timestamp);
+		rtp->ssrc     =rte_be_to_cpu_32(rtp_conf[i].rtp_ssrc);
 
 		// append Payload data;
 		payload=(uint8_t *)rte_pktmbuf_append(m,sizeof(uint8_t)*RTPGEN_RTP_PAYLOAD_LEN);
-		payload_idx=rtp_conf[sessionid].rtp_sequence;
+		payload_idx=rtp_conf[i].rtp_sequence;
 		payload_idx*=RTPGEN_RTP_PAYLOAD_LEN;
 		payload_idx%=rtpgen_payload_data_len;
 
-        	rte_memcpy((uint8_t *)payload,
-        	           (uint8_t *)&(rtpgen_payload_data)+payload_idx, RTPGEN_RTP_PAYLOAD_LEN);
+		rte_memcpy((uint8_t *)payload,
+		           (uint8_t *)&(rtpgen_payload_data)+payload_idx, RTPGEN_RTP_PAYLOAD_LEN);
 
-		rtp_conf[sessionid].rtp_timestamp+=RTPGEN_RTP_PAYLOAD_LEN;
-		rtp_conf[sessionid].rtp_sequence+=1;
+		rtp_conf[i].rtp_timestamp+=RTPGEN_RTP_PAYLOAD_LEN;
+		rtp_conf[i].rtp_sequence+=1;
 		sessionid++;
 	}
 	/* 
-         * パケット生成途中にあるリソースがdisableになった場合のメモリリーク対策
-         * ホンマに効果あるかは微妙・・・？
-         */
+	 * パケット生成途中にあるリソースがdisableになった場合のメモリリーク対策
+	 * ホンマに効果あるかは微妙・・・？
+	 */
 	for(i=sessionid;i<count;i++)
 		rte_pktmbuf_free(pkts[i]);
 	
@@ -501,18 +526,21 @@ rtpgen_main_loop(void){
 								rtpgen_active_sessions++;
 						if(rte_pktmbuf_alloc_bulk(l2fwd_pktmbuf_pool, tx_bursts, rtpgen_active_sessions)!=0)
 							continue;
+						
 						rtpgen_prev_tsc=cur_tsc;
 						rtpgen_active_sessions=rtpgen_setup_newpacket(portid, tx_bursts, rtpgen_active_sessions);
 					}
 				
 					for (sessionid=cur_sessionid;
-						sessionid<cur_sessionid+32 && sessionid<rtpgen_sessions;
+						//sessionid<cur_sessionid+32 && sessionid<rtpgen_sessions;
+						sessionid<cur_sessionid+32 && sessionid<rtpgen_active_sessions;
 						sessionid++){
 						sent = rte_eth_tx_buffer(portid, 0, tx_buffer[portid], tx_bursts[sessionid]);
 						if (sent)
 							port_statistics[portid].tx += sent;
 					}
-					if(sessionid >= rtpgen_sessions){
+					//if(sessionid >= rtpgen_sessions){
+					if(sessionid >= rtpgen_active_sessions){
 						rtpgen_rtp_timer_tsc=cur_tsc-rtpgen_prev_tsc;
 						cur_sessionid=0;
 					}else{
@@ -842,13 +870,297 @@ check_all_ports_link_status(uint16_t port_num, uint32_t port_mask)
 	}
 }
 
+uint32_t api_call_read_resources(RtpConfig *ret, struct rtpgen_rtp_config *data);
+uint32_t api_sub_call_write(RtpConfig *source,
+                            struct rtpgen_rtp_config *target,
+                            rtpgen_ethIpUdpHdr_t *header);
+void api_rest_rtp_config(RtpConfig *source, struct rtpgen_rtp_config *target);
+
+uint32_t api_call_read_resources(RtpConfig *ret, struct rtpgen_rtp_config *data){
+	if(!ret){
+		return RTPGEN_IPCMSG_V1__RESPONSE__ERROR_SERVER_ERROR;
+	}
+	ret->has_enabled       = true; ret->enabled       = data->enabled;
+	ret->has_ip_dst_addr   = true; ret->ip_dst_addr   = data->ip_dst_addr;
+	ret->has_ip_src_addr   = true; ret->ip_src_addr   = data->ip_src_addr;
+	ret->has_udp_dst_port  = true; ret->udp_dst_port  = data->udp_dst_port;
+	ret->has_udp_src_port  = true; ret->udp_src_port  = data->udp_src_port;
+	ret->has_rtp_timestamp = true; ret->rtp_timestamp = data->rtp_timestamp;
+	ret->has_rtp_sequence  = true; ret->rtp_sequence  = data->rtp_sequence;
+	ret->has_rtp_ssrc      = true; ret->rtp_ssrc      = data->rtp_ssrc;
+	return RTPGEN_IPCMSG_V1__RESPONSE__SUCCESS;
+}
+
+uint32_t api_sub_call_write(RtpConfig *source,
+                            struct rtpgen_rtp_config *target,
+                            rtpgen_ethIpUdpHdr_t *header){
+	if(!target){
+		return RTPGEN_IPCMSG_V1__RESPONSE__ERROR_SERVER_ERROR;
+	}
+	if(source){
+		if(source->has_ip_dst_addr  ){
+			target->ip_dst_addr  =                  source->ip_dst_addr;
+			header->ip.dst_addr  = rte_be_to_cpu_32(source->ip_dst_addr);
+		}
+		if(source->has_ip_src_addr  ){
+			target->ip_src_addr  =                  source->ip_src_addr;
+			header->ip.src_addr  = rte_be_to_cpu_32(source->ip_src_addr);
+		}
+		if(source->has_udp_dst_port ){
+			target->udp_dst_port =                  source->udp_dst_port;
+			header->udp.dst_port = rte_be_to_cpu_16(source->udp_dst_port);
+		}
+		if(source->has_udp_src_port ){
+			target->udp_src_port =                  source->udp_src_port;
+			header->udp.src_port = rte_be_to_cpu_16(source->udp_src_port);
+		}
+		if(source->has_rtp_timestamp) target->rtp_timestamp = source->rtp_timestamp;
+		if(source->has_rtp_sequence ) target->rtp_sequence  = source->rtp_sequence;
+		if(source->has_rtp_ssrc     ) target->rtp_ssrc      = source->rtp_ssrc;
+	}
+	return RTPGEN_IPCMSG_V1__RESPONSE__SUCCESS;
+}
+
+void api_rest_rtp_config(RtpConfig *source, struct rtpgen_rtp_config *target){
+	uint32_t s_time=rand();
+	/* 音源の長さに合わせて必ず音源ファイルの先頭になるようにオフセットする */
+	if(!source || !source->has_rtp_timestamp)
+		target->rtp_timestamp = s_time-s_time%rtpgen_payload_data_len;
+
+	if(!source || !source->has_rtp_sequence ) target->rtp_sequence  = rand();
+	if(!source || !source->has_rtp_ssrc     ) target->rtp_ssrc      = rand();
+}
+
+void enabling_message(RtpgenIPCmsgV1 *request_msg, RtpgenIPCmsgV1 *response_msg){
+	struct rtpgen_rtp_config *data;
+	rtpgen_ethIpUdpHdr_t *hdr;
+	uint32_t selector;
+	uint32_t portid;
+	response_msg->has_response_code=1;
+	response_msg->response_code=RTPGEN_IPCMSG_V1__RESPONSE__SUCCESS;
+
+	/*  validation message */
+	if(! request_msg->has_request_code ||
+	   ! request_msg->has_portid ||
+	   ! request_msg->has_id_selector){
+		response_msg->response_code=RTPGEN_IPCMSG_V1__RESPONSE__ERROR_BAD_REQUEST;
+		return;
+	}
+	selector = request_msg->id_selector;
+ 	portid   = request_msg->portid;
+
+	if(selector>=rtpgen_sessions){
+		response_msg->has_id_selector=true;
+		response_msg->id_selector    =rtpgen_sessions-1;
+		response_msg->response_code=RTPGEN_IPCMSG_V1__RESPONSE__ERROR_NOT_FOUND;
+		return;
+	}
+	if(portid >= RTE_MAX_ETHPORTS){
+		response_msg->has_portid=true;
+		response_msg->portid    =RTE_MAX_ETHPORTS-1;
+		response_msg->response_code=RTPGEN_IPCMSG_V1__RESPONSE__ERROR_NOT_FOUND;
+		return;
+	}
+	if((l2fwd_enabled_port_mask & (1 << portid)) == 0){
+		response_msg->has_portid=true;
+		response_msg->portid    =portid;
+		response_msg->response_code=RTPGEN_IPCMSG_V1__RESPONSE__ERROR_FORBIDDEN;
+		return;
+	}
+		
+	data=&(rtp_configs_per_port[portid][selector]);
+	hdr=&(constantHeaders[portid][selector]);
+
+	if(data == NULL){
+		response_msg->response_code=RTPGEN_IPCMSG_V1__RESPONSE__ERROR_SERVER_ERROR;
+		return;
+	}
+
+	switch(request_msg->request_code){
+		case RTPGEN_IPCMSG_V1__REQUEST__CREATE:
+			if(data->enabled){ // すでに存在する場合はエラー
+				response_msg->response_code=
+					RTPGEN_IPCMSG_V1__RESPONSE__ERROR_CONFLICT;
+				return;
+			}
+			response_msg->response_code=
+				api_sub_call_write(request_msg->rtp_config, data, hdr);
+			api_rest_rtp_config(request_msg->rtp_config, data);
+			data->enabled = true;
+			break;
+		case RTPGEN_IPCMSG_V1__REQUEST__READ:
+			if(!data->enabled){ // 存在しない場合はエラー
+				response_msg->response_code=
+					RTPGEN_IPCMSG_V1__RESPONSE__ERROR_NOT_FOUND;
+				return;
+			}
+			response_msg->response_code=
+				api_call_read_resources(response_msg->rtp_config, data);
+			break;
+		case RTPGEN_IPCMSG_V1__REQUEST__UPDATE:
+			if(!data->enabled){ // 存在しない場合はエラー
+				response_msg->response_code=
+					RTPGEN_IPCMSG_V1__RESPONSE__ERROR_NOT_FOUND;
+				return;
+			}
+			response_msg->response_code=
+				api_sub_call_write(request_msg->rtp_config, data, hdr);
+			break;
+		case RTPGEN_IPCMSG_V1__REQUEST__DELETE:
+			if(!data->enabled){ // 存在しない場合はエラー
+				response_msg->response_code=
+					RTPGEN_IPCMSG_V1__RESPONSE__ERROR_NOT_FOUND;
+				return;
+			}
+			data->enabled=false; // 無効化
+			break;
+		default:
+			response_msg->response_code = 
+				RTPGEN_IPCMSG_V1__RESPONSE__ERROR_BAD_REQUEST;
+			return;
+	}
+	response_msg->has_portid      = true; response_msg->portid     =portid;
+	response_msg->has_id_selector = true; response_msg->id_selector=selector;
+}
+
+void subthread_loop(int *p_sock){
+	int sock=*p_sock;
+	uint8_t buf[1024];
+	int len = 0;
+	int send_buffer_len = 0;
+	void *send_buffer            = NULL;
+	RtpgenIPCmsgV1 *pack         = NULL;
+	RtpgenIPCmsgV1 *response_msg = NULL;
+
+	while(true){
+		memset(buf,0,sizeof(uint8_t)*1024);
+		len = read(sock, buf, sizeof(buf));
+		if(len <= 0){
+			printf("connection remote closed.\n");
+			break;
+		}
+		printf(".");
+		//printf("%s", buf);
+
+		// recived data
+		pack=rtpgen_ipcmsg_v1__unpack(NULL, len, buf);
+
+		if(pack == NULL){
+			printf("protobuf read error\n");
+			break;
+		}
+
+		// create response data
+		response_msg=(RtpgenIPCmsgV1 *)malloc(sizeof(RtpgenIPCmsgV1));
+		if(response_msg == NULL){
+			printf("memmory allocation error\n");
+			break;
+		}
+
+		// initialized response data
+		rtpgen_ipcmsg_v1__init(response_msg);
+
+		// update response data rtp_config field
+		response_msg->rtp_config=(RtpConfig *)malloc(sizeof(RtpConfig));
+		if(response_msg->rtp_config == NULL){
+			printf("memmory allocation error\n");
+			break;
+		}
+		rtp_config__init(response_msg->rtp_config);
+
+		enabling_message(pack, response_msg);
+		if(response_msg==NULL){
+			printf("error exit\n");
+			break;
+		}
+
+		send_buffer_len=rtpgen_ipcmsg_v1__get_packed_size(response_msg);
+		send_buffer=malloc(send_buffer_len);
+		if(send_buffer == NULL){
+			printf("memmory allocation error\n");
+			break;
+		}
+
+		rtpgen_ipcmsg_v1__pack(response_msg, send_buffer);
+		write(sock, send_buffer, send_buffer_len);
+
+		rtpgen_ipcmsg_v1__free_unpacked(pack, NULL);
+
+		if(response_msg != NULL){
+			if(response_msg->rtp_config != NULL)
+				free(response_msg->rtp_config);
+			response_msg->rtp_config=NULL;
+			free(response_msg);
+		}
+		response_msg=NULL;
+		if(send_buffer != NULL)
+			free(send_buffer);
+		send_buffer=NULL;
+	}
+
+	if(response_msg != NULL){
+		if(response_msg->rtp_config != NULL)
+			free(response_msg->rtp_config);
+		free(response_msg);
+	}
+	if(send_buffer != NULL)
+		free(send_buffer);
+
+	printf("sub_socket closed\n");
+	pt_th--;
+	close(sock);
+}
+
+void thread_loop(struct socket_info *info){
+	int sock;
+	int ssock;
+	struct sockaddr_in client;
+	unsigned client_addr_len;
+	//pthread_t threads[MAX_SESSIONS];
+
+	sock=info->sock;
+	printf("socket opened\n");
+
+	client_addr_len=sizeof(client);
+	listen(sock, 1-1);
+	while(!force_quit){
+		ssock = accept(sock, (struct sockaddr *)&client, &client_addr_len);
+		info->ssock=ssock;
+		printf("-- sub socket open with fd:%d\n",ssock);
+		if(ssock > 0){
+			if(pt_th >= 1){
+				printf("MAX-Sessions : Connection closed.\n");
+				close(ssock);
+			}else{
+				pthread_create(&sub_socket_thread,NULL,(void *)subthread_loop,(void *)&ssock);
+				p_sub_socket_thread=&sub_socket_thread;
+				pt_th++;
+			}
+		}
+   } 
+   pthread_join(sub_socket_thread,NULL);
+	p_sub_socket_thread=NULL;
+   close(ssock);
+}
+
+
 static void
-signal_handler(int signum)
-{
+signal_handler(int signum) {
+	//int ret;
 	if (signum == SIGINT || signum == SIGTERM) {
 		printf("\n\nSignal %d received, preparing to exit...\n",
 				signum);
 		force_quit = true;
+		printf("SIGNAl interupt... SIG:%d\n",signum);
+		if(p_sub_socket_thread!=NULL){
+			pthread_cancel(sub_socket_thread);
+			pthread_kill(sub_socket_thread, SIGTERM);
+		}
+		if(p_socket_main_thread!=NULL){
+			pthread_cancel(socket_main_thread);
+			pthread_kill(socket_main_thread, SIGTERM);
+		}
+		printf("thread closed...\n");
 	}else if(signum == SIGHUP || signum == SIGUSR1) {
 		// printf("\n\nReloaded\n\n");
 	}
@@ -870,6 +1182,11 @@ main(int argc, char **argv)
 
 	srand((unsigned)time(NULL));
 
+	struct sockaddr_in addr;
+	
+	struct socket_info sinfo;
+	int sock = -1;
+	
 	/* init EAL */
 	ret = rte_eal_init(argc, argv);
 	if (ret < 0)
@@ -1106,38 +1423,48 @@ main(int argc, char **argv)
 				 portid);
 
 		/* 各ポート毎のセッション情報を初期化 */
-		rtp_configs_per_port[portid]=(struct rtpgen_rtp_config *)malloc(sizeof(struct rtpgen_rtp_config)*RTPGEN_RTP_MAX_SESSIONS);
+		rtp_configs_per_port[portid]=
+			(struct rtpgen_rtp_config *)malloc(
+				sizeof(struct rtpgen_rtp_config)*RTPGEN_RTP_MAX_SESSIONS);
+		constantHeaders[portid]=
+			(rtpgen_ethIpUdpHdr_t *)malloc(
+				sizeof(rtpgen_ethIpUdpHdr_t)*RTPGEN_RTP_MAX_SESSIONS);
+
 		tmp_set=rtp_configs_per_port[portid];
 
 		for(i=0; i<rtpgen_sessions; i++){
-			tmp_set[i].enabled=true;
+			tmp_set[i].enabled=false;
 			tmp_set[i].portid=portid;
 			tmp_set[i].rtp_timestamp=0;
 			tmp_set[i].rtp_sequence=0;
 			tmp_set[i].rtp_ssrc=rand();
+			tmp_set[i].ip_dst_addr=IPv4(127,0,0,1);
+			tmp_set[i].ip_src_addr=IPv4(127,0,0,1);
+			tmp_set[i].udp_dst_port=6000+1000*portid+i;
+			tmp_set[i].udp_src_port=8000+1000*portid+i;
 			
 			len=RTPGEN_RTP_PAYLOAD_LEN + sizeof(struct rtpgen_rtp_hdr);
 			len+=sizeof(struct udp_hdr);
-			constantHeaders[i].udp.src_port=rte_be_to_cpu_16(6000+1000*portid+i);
-                        constantHeaders[i].udp.dst_port=rte_be_to_cpu_16(8000+1000*portid+i);
-                        constantHeaders[i].udp.dgram_len=rte_be_to_cpu_16(len);
-                        constantHeaders[i].udp.dgram_cksum=0;
+			constantHeaders[portid][i].udp.src_port=rte_be_to_cpu_16(8000+1000*portid+i);
+			constantHeaders[portid][i].udp.dst_port=rte_be_to_cpu_16(6000+1000*portid+i);
+			constantHeaders[portid][i].udp.dgram_len=rte_be_to_cpu_16(len);
+			constantHeaders[portid][i].udp.dgram_cksum=0;
 
 			len+=sizeof(struct ipv4_hdr);
-			constantHeaders[i].ip.dst_addr=rte_be_to_cpu_32(IPv4(192,168,0,i%254+1));
-			constantHeaders[i].ip.src_addr=rte_be_to_cpu_32(IPv4(192,168,1,i%254+1));
-			constantHeaders[i].ip.version_ihl=0x45;
-			constantHeaders[i].ip.type_of_service=0x05;
-			constantHeaders[i].ip.total_length=rte_be_to_cpu_16(len);
-			constantHeaders[i].ip.packet_id=0;                                               			
-			constantHeaders[i].ip.fragment_offset=rte_be_to_cpu_16(0x4000);                  			
-			constantHeaders[i].ip.time_to_live=64;                                           			
-			constantHeaders[i].ip.next_proto_id=17;                                          			
-			constantHeaders[i].ip.hdr_checksum=0;
+			constantHeaders[portid][i].ip.dst_addr=rte_be_to_cpu_32(IPv4(127,0,0,1));
+			constantHeaders[portid][i].ip.src_addr=rte_be_to_cpu_32(IPv4(127,0,0,1));
+			constantHeaders[portid][i].ip.version_ihl=0x45;
+			constantHeaders[portid][i].ip.type_of_service=0x05;
+			constantHeaders[portid][i].ip.total_length=rte_be_to_cpu_16(len);
+			constantHeaders[portid][i].ip.packet_id=0;
+			constantHeaders[portid][i].ip.fragment_offset=rte_be_to_cpu_16(0x4000);
+			constantHeaders[portid][i].ip.time_to_live=64;
+			constantHeaders[portid][i].ip.next_proto_id=17;
+			constantHeaders[portid][i].ip.hdr_checksum=0;
 
-			ether_addr_copy(&l2fwd_ports_eth_peer_addr[portid], &(constantHeaders[i].eth.d_addr));
-			ether_addr_copy(&l2fwd_ports_eth_addr[portid], &(constantHeaders[i].eth.s_addr));
-			constantHeaders[i].eth.ether_type = rte_be_to_cpu_16(ETHER_TYPE_IPv4);
+			ether_addr_copy(&l2fwd_ports_eth_peer_addr[portid], &(constantHeaders[portid][i].eth.d_addr));
+			ether_addr_copy(&l2fwd_ports_eth_addr[portid], &(constantHeaders[portid][i].eth.s_addr));
+			constantHeaders[portid][i].eth.ether_type = rte_be_to_cpu_16(ETHER_TYPE_IPv4);
 		}
 
 
@@ -1184,6 +1511,27 @@ main(int argc, char **argv)
 
 	check_all_ports_link_status(nb_ports, l2fwd_enabled_port_mask);
 
+
+	/* Bind controllers endpoint */
+	sock = socket(AF_INET,  SOCK_STREAM, 0);
+	sinfo.sock=sock;
+	sinfo.ssock=0;
+
+	memset(&addr,0,sizeof(struct sockaddr_in));
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(55077);
+
+	bind(sock, (struct sockaddr *)&addr, sizeof(addr));
+
+	printf("- open %d\n",sinfo.sock);
+	
+	ret = pthread_create(&socket_main_thread,NULL,(void *)thread_loop,(void *)&sinfo);
+	p_socket_main_thread=&socket_main_thread;
+	if (ret != 0){
+		rte_exit(EXIT_FAILURE,
+			"Could not bind controllers tcp port(0.0.0.0:55077).\n");
+	}
+
 	ret = 0;
 	/* launch per-lcore init on every lcore */
 	// main loopを呼び出し
@@ -1208,6 +1556,24 @@ main(int argc, char **argv)
 		}
 	}
 
+	// add controller tcpport function
+	if(p_sub_socket_thread)
+    	ret = pthread_join(sub_socket_thread,NULL);
+	if(p_socket_main_thread)
+		ret = pthread_join(socket_main_thread,NULL);
+
+	printf("the program will be terminating...\n");
+	if(sinfo.ssock!=0){
+		shutdown(sinfo.ssock,0);
+		close(sinfo.ssock);
+		printf("- close sub  %d\n",sinfo.ssock); shutdown(sinfo.sock,0);
+	}
+	if(sinfo.sock!=0){
+		close(sock);
+		printf("- close main %d\n",sinfo.sock);
+	}
+
+
 	for (portid = 0; portid < nb_ports; portid++) {
 		if ((l2fwd_enabled_port_mask & (1 << portid)) == 0)
 			continue;
@@ -1224,6 +1590,7 @@ main(int argc, char **argv)
 		rte_eth_dev_close(portid);
 
 		free(rtp_configs_per_port[portid]);
+		free(constantHeaders[portid]);
 		printf(" Done\n");
 	}
 	printf("Bye...\n");

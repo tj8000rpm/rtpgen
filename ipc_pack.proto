@@ -1,0 +1,38 @@
+message RtpConfig{
+  optional bool   enabled       = 1;
+  optional uint32 ip_dst_addr   = 3;
+  optional uint32 ip_src_addr   = 4;
+  optional uint32 udp_dst_port  = 5;
+  optional uint32 udp_src_port  = 6;
+  optional uint32 rtp_timestamp = 7;
+  optional uint32 rtp_sequence  = 8;
+  optional uint32 rtp_ssrc      = 9; 
+}
+
+message RtpgenIPCmsgV1 {
+
+  enum Request {
+    CREATE = 0;
+    READ = 1;
+    UPDATE = 2;
+    DELETE = 3;
+  }
+
+  enum Response {
+    SUCCESS = 200;
+    ERROR_BAD_REQUEST = 400;
+    ERROR_FORBIDDEN = 403;
+    ERROR_NOT_FOUND = 404;
+    ERROR_CONFLICT = 409;
+    ERROR_SERVER_ERROR = 500;
+    ERROR_SERVICE_UNAVAILABLE = 503;
+  }
+
+  optional Request request_code = 1;
+  optional Response response_code = 2;
+  optional uint32 portid = 3;
+  optional int32 id_selector = 4;
+  optional int32 size = 5;
+
+  optional RtpConfig rtp_config = 6;
+}

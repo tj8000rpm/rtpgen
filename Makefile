@@ -29,6 +29,10 @@
 #   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 #   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+$(warning MAKE = $(MAKE))
+$(warning CC = $(CC))
+$(warning CFLAGS = $(CFLAGS))
+
 ifeq ($(RTE_SDK),)
 $(error "Please define RTE_SDK environment variable")
 endif
@@ -42,9 +46,12 @@ include $(RTE_SDK)/mk/rte.vars.mk
 APP = rtpgen
 
 # all source are stored in SRCS-y
-SRCS-y := main.c
+SRCS-y := main.c ipc_pack.pb-c.c
 
+CFLAGS += -I$(SRCDIR)
 CFLAGS += -O3
 CFLAGS += $(WERROR_FLAGS)
+CFLAGS += -lprotobuf-c
+
 
 include $(RTE_SDK)/mk/rte.extapp.mk
