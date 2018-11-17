@@ -1,4 +1,4 @@
-message RtpConfig{
+message RtpConfigV1{
   optional bool   enabled       = 1;
   optional uint32 ip_dst_addr   = 3;
   optional uint32 ip_src_addr   = 4;
@@ -34,5 +34,5 @@ message RtpgenIPCmsgV1 {
   optional int32 id_selector = 4;
   optional int32 size = 5;
 
-  optional RtpConfig rtp_config = 6;
+  optional RtpConfigV1 rtp_config = 6;
 }

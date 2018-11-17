@@ -870,13 +870,13 @@ check_all_ports_link_status(uint16_t port_num, uint32_t port_mask)
 	}
 }
 
-uint32_t api_call_read_resources(RtpConfig *ret, struct rtpgen_rtp_config *data);
-uint32_t api_sub_call_write(RtpConfig *source,
+uint32_t api_call_read_resources(RtpConfigV1 *ret, struct rtpgen_rtp_config *data);
+uint32_t api_sub_call_write(RtpConfigV1 *source,
                             struct rtpgen_rtp_config *target,
                             rtpgen_ethIpUdpHdr_t *header);
-void api_rest_rtp_config(RtpConfig *source, struct rtpgen_rtp_config *target);
+void api_rest_rtp_config(RtpConfigV1 *source, struct rtpgen_rtp_config *target);
 
-uint32_t api_call_read_resources(RtpConfig *ret, struct rtpgen_rtp_config *data){
+uint32_t api_call_read_resources(RtpConfigV1 *ret, struct rtpgen_rtp_config *data){
 	if(!ret){
 		return RTPGEN_IPCMSG_V1__RESPONSE__ERROR_SERVER_ERROR;
 	}
@@ -891,7 +891,7 @@ uint32_t api_call_read_resources(RtpConfig *ret, struct rtpgen_rtp_config *data)
 	return RTPGEN_IPCMSG_V1__RESPONSE__SUCCESS;
 }
 
-uint32_t api_sub_call_write(RtpConfig *source,
+uint32_t api_sub_call_write(RtpConfigV1 *source,
                             struct rtpgen_rtp_config *target,
                             rtpgen_ethIpUdpHdr_t *header){
 	if(!target){
@@ -921,7 +921,7 @@ uint32_t api_sub_call_write(RtpConfig *source,
 	return RTPGEN_IPCMSG_V1__RESPONSE__SUCCESS;
 }
 
-void api_rest_rtp_config(RtpConfig *source, struct rtpgen_rtp_config *target){
+void api_rest_rtp_config(RtpConfigV1 *source, struct rtpgen_rtp_config *target){
 	uint32_t s_time=rand();
 	/* 音源の長さに合わせて必ず音源ファイルの先頭になるようにオフセットする */
 	if(!source || !source->has_rtp_timestamp)
@@ -1039,9 +1039,6 @@ void subthread_loop(int *p_sock){
 			printf("connection remote closed.\n");
 			break;
 		}
-		printf(".");
-		//printf("%s", buf);
-
 		// recived data
 		pack=rtpgen_ipcmsg_v1__unpack(NULL, len, buf);
 
@@ -1061,19 +1058,21 @@ void subthread_loop(int *p_sock){
 		rtpgen_ipcmsg_v1__init(response_msg);
 
 		// update response data rtp_config field
-		response_msg->rtp_config=(RtpConfig *)malloc(sizeof(RtpConfig));
+		response_msg->rtp_config=(RtpConfigV1 *)malloc(sizeof(RtpConfigV1));
 		if(response_msg->rtp_config == NULL){
 			printf("memmory allocation error\n");
 			break;
 		}
-		rtp_config__init(response_msg->rtp_config);
+		rtp_config_v1__init(response_msg->rtp_config);
 
+		// IPCメッセージの内容を処理
 		enabling_message(pack, response_msg);
 		if(response_msg==NULL){
 			printf("error exit\n");
 			break;
 		}
-
+		
+		// レスポンスメッセージを
 		send_buffer_len=rtpgen_ipcmsg_v1__get_packed_size(response_msg);
 		send_buffer=malloc(send_buffer_len);
 		if(send_buffer == NULL){
@@ -1126,7 +1125,6 @@ void thread_loop(struct socket_info *info){
 	while(!force_quit){
 		ssock = accept(sock, (struct sockaddr *)&client, &client_addr_len);
 		info->ssock=ssock;
-		printf("-- sub socket open with fd:%d\n",ssock);
 		if(ssock > 0){
 			if(pt_th >= 1){
 				printf("MAX-Sessions : Connection closed.\n");
@@ -1566,11 +1564,9 @@ main(int argc, char **argv)
 	if(sinfo.ssock!=0){
 		shutdown(sinfo.ssock,0);
 		close(sinfo.ssock);
-		printf("- close sub  %d\n",sinfo.ssock); shutdown(sinfo.sock,0);
 	}
 	if(sinfo.sock!=0){
 		close(sock);
-		printf("- close main %d\n",sinfo.sock);
 	}
 
 

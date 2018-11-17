@@ -175,27 +175,4 @@ s.connect(('localhost',55077))
 
 help()
 
-#try:
-#
-#  print('*'*25)
-#  printVal(getrsc(0,0))
-#  printVal(crersc(0,0,
-#    src=('192.168.0.32',8000),
-#    dst=('192.168.0.32',8989)))
-#  printVal(getrsc(0,0))
-#  
-#  printVal(getrsc(0,1))
-#  printVal(crersc(0,1,
-#    src=('192.168.0.32',8001),
-#    dst=('192.168.0.32',7979)))
-#  printVal(getrsc(0,1))
-#  
-#  time.sleep(5)
-#  
-#  for i in range(0,2):
-#    printVal(getrsc(0,i))
-#    printVal(delrsc(0,i))
-#    printVal(getrsc(0,i))
-#finally:
-#  s.close()
-#
+## run as interactivemode

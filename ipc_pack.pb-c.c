@@ -7,47 +7,47 @@
 #endif
 
 #include "ipc_pack.pb-c.h"
-void   rtp_config__init
-                     (RtpConfig         *message)
+void   rtp_config_v1__init
+                     (RtpConfigV1         *message)
 {
-  static RtpConfig init_value = RTP_CONFIG__INIT;
+  static RtpConfigV1 init_value = RTP_CONFIG_V1__INIT;
   *message = init_value;
 }
-size_t rtp_config__get_packed_size
-                     (const RtpConfig *message)
+size_t rtp_config_v1__get_packed_size
+                     (const RtpConfigV1 *message)
 {
-  assert(message->base.descriptor == &rtp_config__descriptor);
+  assert(message->base.descriptor == &rtp_config_v1__descriptor);
   return protobuf_c_message_get_packed_size ((const ProtobufCMessage*)(message));
 }
-size_t rtp_config__pack
-                     (const RtpConfig *message,
+size_t rtp_config_v1__pack
+                     (const RtpConfigV1 *message,
                       uint8_t       *out)
 {
-  assert(message->base.descriptor == &rtp_config__descriptor);
+  assert(message->base.descriptor == &rtp_config_v1__descriptor);
   return protobuf_c_message_pack ((const ProtobufCMessage*)message, out);
 }
-size_t rtp_config__pack_to_buffer
-                     (const RtpConfig *message,
+size_t rtp_config_v1__pack_to_buffer
+                     (const RtpConfigV1 *message,
                       ProtobufCBuffer *buffer)
 {
-  assert(message->base.descriptor == &rtp_config__descriptor);
+  assert(message->base.descriptor == &rtp_config_v1__descriptor);
   return protobuf_c_message_pack_to_buffer ((const ProtobufCMessage*)message, buffer);
 }
-RtpConfig *
-       rtp_config__unpack
+RtpConfigV1 *
+       rtp_config_v1__unpack
                      (ProtobufCAllocator  *allocator,
                       size_t               len,
                       const uint8_t       *data)
 {
-  return (RtpConfig *)
-     protobuf_c_message_unpack (&rtp_config__descriptor,
+  return (RtpConfigV1 *)
+     protobuf_c_message_unpack (&rtp_config_v1__descriptor,
                                 allocator, len, data);
 }
-void   rtp_config__free_unpacked
-                     (RtpConfig *message,
+void   rtp_config_v1__free_unpacked
+                     (RtpConfigV1 *message,
                       ProtobufCAllocator *allocator)
 {
-  assert(message->base.descriptor == &rtp_config__descriptor);
+  assert(message->base.descriptor == &rtp_config_v1__descriptor);
   protobuf_c_message_free_unpacked ((ProtobufCMessage*)message, allocator);
 }
 void   rtpgen_ipcmsg_v1__init
@@ -93,15 +93,15 @@ void   rtpgen_ipcmsg_v1__free_unpacked
   assert(message->base.descriptor == &rtpgen_ipcmsg_v1__descriptor);
   protobuf_c_message_free_unpacked ((ProtobufCMessage*)message, allocator);
 }
-static const ProtobufCFieldDescriptor rtp_config__field_descriptors[8] =
+static const ProtobufCFieldDescriptor rtp_config_v1__field_descriptors[8] =
 {
   {
     "enabled",
     1,
     PROTOBUF_C_LABEL_OPTIONAL,
     PROTOBUF_C_TYPE_BOOL,
-    offsetof(RtpConfig, has_enabled),
-    offsetof(RtpConfig, enabled),
+    offsetof(RtpConfigV1, has_enabled),
+    offsetof(RtpConfigV1, enabled),
     NULL,
     NULL,
     0,             /* flags */
@@ -112,8 +112,8 @@ static const ProtobufCFieldDescriptor rtp_config__field_descriptors[8] =
     3,
     PROTOBUF_C_LABEL_OPTIONAL,
     PROTOBUF_C_TYPE_UINT32,
-    offsetof(RtpConfig, has_ip_dst_addr),
-    offsetof(RtpConfig, ip_dst_addr),
+    offsetof(RtpConfigV1, has_ip_dst_addr),
+    offsetof(RtpConfigV1, ip_dst_addr),
     NULL,
     NULL,
     0,             /* flags */
@@ -124,8 +124,8 @@ static const ProtobufCFieldDescriptor rtp_config__field_descriptors[8] =
     4,
     PROTOBUF_C_LABEL_OPTIONAL,
     PROTOBUF_C_TYPE_UINT32,
-    offsetof(RtpConfig, has_ip_src_addr),
-    offsetof(RtpConfig, ip_src_addr),
+    offsetof(RtpConfigV1, has_ip_src_addr),
+    offsetof(RtpConfigV1, ip_src_addr),
     NULL,
     NULL,
     0,             /* flags */
@@ -136,8 +136,8 @@ static const ProtobufCFieldDescriptor rtp_config__field_descriptors[8] =
     5,
     PROTOBUF_C_LABEL_OPTIONAL,
     PROTOBUF_C_TYPE_UINT32,
-    offsetof(RtpConfig, has_udp_dst_port),
-    offsetof(RtpConfig, udp_dst_port),
+    offsetof(RtpConfigV1, has_udp_dst_port),
+    offsetof(RtpConfigV1, udp_dst_port),
     NULL,
     NULL,
     0,             /* flags */
@@ -148,8 +148,8 @@ static const ProtobufCFieldDescriptor rtp_config__field_descriptors[8] =
     6,
     PROTOBUF_C_LABEL_OPTIONAL,
     PROTOBUF_C_TYPE_UINT32,
-    offsetof(RtpConfig, has_udp_src_port),
-    offsetof(RtpConfig, udp_src_port),
+    offsetof(RtpConfigV1, has_udp_src_port),
+    offsetof(RtpConfigV1, udp_src_port),
     NULL,
     NULL,
     0,             /* flags */
@@ -160,8 +160,8 @@ static const ProtobufCFieldDescriptor rtp_config__field_descriptors[8] =
     7,
     PROTOBUF_C_LABEL_OPTIONAL,
     PROTOBUF_C_TYPE_UINT32,
-    offsetof(RtpConfig, has_rtp_timestamp),
-    offsetof(RtpConfig, rtp_timestamp),
+    offsetof(RtpConfigV1, has_rtp_timestamp),
+    offsetof(RtpConfigV1, rtp_timestamp),
     NULL,
     NULL,
     0,             /* flags */
@@ -172,8 +172,8 @@ static const ProtobufCFieldDescriptor rtp_config__field_descriptors[8] =
     8,
     PROTOBUF_C_LABEL_OPTIONAL,
     PROTOBUF_C_TYPE_UINT32,
-    offsetof(RtpConfig, has_rtp_sequence),
-    offsetof(RtpConfig, rtp_sequence),
+    offsetof(RtpConfigV1, has_rtp_sequence),
+    offsetof(RtpConfigV1, rtp_sequence),
     NULL,
     NULL,
     0,             /* flags */
@@ -184,15 +184,15 @@ static const ProtobufCFieldDescriptor rtp_config__field_descriptors[8] =
     9,
     PROTOBUF_C_LABEL_OPTIONAL,
     PROTOBUF_C_TYPE_UINT32,
-    offsetof(RtpConfig, has_rtp_ssrc),
-    offsetof(RtpConfig, rtp_ssrc),
+    offsetof(RtpConfigV1, has_rtp_ssrc),
+    offsetof(RtpConfigV1, rtp_ssrc),
     NULL,
     NULL,
     0,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
 };
-static const unsigned rtp_config__field_indices_by_name[] = {
+static const unsigned rtp_config_v1__field_indices_by_name[] = {
   0,   /* field[0] = enabled */
   1,   /* field[1] = ip_dst_addr */
   2,   /* field[2] = ip_src_addr */
@@ -202,25 +202,25 @@ static const unsigned rtp_config__field_indices_by_name[] = {
   3,   /* field[3] = udp_dst_port */
   4,   /* field[4] = udp_src_port */
 };
-static const ProtobufCIntRange rtp_config__number_ranges[2 + 1] =
+static const ProtobufCIntRange rtp_config_v1__number_ranges[2 + 1] =
 {
   { 1, 0 },
   { 3, 1 },
   { 0, 8 }
 };
-const ProtobufCMessageDescriptor rtp_config__descriptor =
+const ProtobufCMessageDescriptor rtp_config_v1__descriptor =
 {
   PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
-  "RtpConfig",
-  "RtpConfig",
-  "RtpConfig",
+  "RtpConfigV1",
+  "RtpConfigV1",
+  "RtpConfigV1",
   "",
-  sizeof(RtpConfig),
+  sizeof(RtpConfigV1),
   8,
-  rtp_config__field_descriptors,
-  rtp_config__field_indices_by_name,
-  2,  rtp_config__number_ranges,
-  (ProtobufCMessageInit) rtp_config__init,
+  rtp_config_v1__field_descriptors,
+  rtp_config_v1__field_indices_by_name,
+  2,  rtp_config_v1__number_ranges,
+  (ProtobufCMessageInit) rtp_config_v1__init,
   NULL,NULL,NULL    /* reserved[123] */
 };
 const ProtobufCEnumValue rtpgen_ipcmsg_v1__request__enum_values_by_number[4] =
@@ -362,7 +362,7 @@ static const ProtobufCFieldDescriptor rtpgen_ipcmsg_v1__field_descriptors[6] =
     PROTOBUF_C_TYPE_MESSAGE,
     0,   /* quantifier_offset */
     offsetof(RtpgenIPCmsgV1, rtp_config),
-    &rtp_config__descriptor,
+    &rtp_config_v1__descriptor,
     NULL,
     0,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */

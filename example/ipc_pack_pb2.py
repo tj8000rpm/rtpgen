@@ -13,7 +13,7 @@ from google.protobuf import descriptor_pb2
 DESCRIPTOR = _descriptor.FileDescriptor(
   name='ipc_pack.proto',
   package='',
-  serialized_pb='\n\x0eipc_pack.proto\"\xb1\x01\n\tRtpConfig\x12\x0f\n\x07\x65nabled\x18\x01 \x01(\x08\x12\x13\n\x0bip_dst_addr\x18\x03 \x01(\r\x12\x13\n\x0bip_src_addr\x18\x04 \x01(\r\x12\x14\n\x0cudp_dst_port\x18\x05 \x01(\r\x12\x14\n\x0cudp_src_port\x18\x06 \x01(\r\x12\x15\n\rrtp_timestamp\x18\x07 \x01(\r\x12\x14\n\x0crtp_sequence\x18\x08 \x01(\r\x12\x10\n\x08rtp_ssrc\x18\t \x01(\r\"\xa9\x03\n\x0eRtpgenIPCmsgV1\x12-\n\x0crequest_code\x18\x01 \x01(\x0e\x32\x17.RtpgenIPCmsgV1.Request\x12/\n\rresponse_code\x18\x02 \x01(\x0e\x32\x18.RtpgenIPCmsgV1.Response\x12\x0e\n\x06portid\x18\x03 \x01(\r\x12\x13\n\x0bid_selector\x18\x04 \x01(\x05\x12\x0c\n\x04size\x18\x05 \x01(\x05\x12\x1e\n\nrtp_config\x18\x06 \x01(\x0b\x32\n.RtpConfig\"7\n\x07Request\x12\n\n\x06\x43REATE\x10\x00\x12\x08\n\x04READ\x10\x01\x12\n\n\x06UPDATE\x10\x02\x12\n\n\x06\x44\x45LETE\x10\x03\"\xaa\x01\n\x08Response\x12\x0c\n\x07SUCCESS\x10\xc8\x01\x12\x16\n\x11\x45RROR_BAD_REQUEST\x10\x90\x03\x12\x14\n\x0f\x45RROR_FORBIDDEN\x10\x93\x03\x12\x14\n\x0f\x45RROR_NOT_FOUND\x10\x94\x03\x12\x13\n\x0e\x45RROR_CONFLICT\x10\x99\x03\x12\x17\n\x12\x45RROR_SERVER_ERROR\x10\xf4\x03\x12\x1e\n\x19\x45RROR_SERVICE_UNAVAILABLE\x10\xf7\x03')
+  serialized_pb='\n\x0eipc_pack.proto\"\xb3\x01\n\x0bRtpConfigV1\x12\x0f\n\x07\x65nabled\x18\x01 \x01(\x08\x12\x13\n\x0bip_dst_addr\x18\x03 \x01(\r\x12\x13\n\x0bip_src_addr\x18\x04 \x01(\r\x12\x14\n\x0cudp_dst_port\x18\x05 \x01(\r\x12\x14\n\x0cudp_src_port\x18\x06 \x01(\r\x12\x15\n\rrtp_timestamp\x18\x07 \x01(\r\x12\x14\n\x0crtp_sequence\x18\x08 \x01(\r\x12\x10\n\x08rtp_ssrc\x18\t \x01(\r\"\xab\x03\n\x0eRtpgenIPCmsgV1\x12-\n\x0crequest_code\x18\x01 \x01(\x0e\x32\x17.RtpgenIPCmsgV1.Request\x12/\n\rresponse_code\x18\x02 \x01(\x0e\x32\x18.RtpgenIPCmsgV1.Response\x12\x0e\n\x06portid\x18\x03 \x01(\r\x12\x13\n\x0bid_selector\x18\x04 \x01(\x05\x12\x0c\n\x04size\x18\x05 \x01(\x05\x12 \n\nrtp_config\x18\x06 \x01(\x0b\x32\x0c.RtpConfigV1\"7\n\x07Request\x12\n\n\x06\x43REATE\x10\x00\x12\x08\n\x04READ\x10\x01\x12\n\n\x06UPDATE\x10\x02\x12\n\n\x06\x44\x45LETE\x10\x03\"\xaa\x01\n\x08Response\x12\x0c\n\x07SUCCESS\x10\xc8\x01\x12\x16\n\x11\x45RROR_BAD_REQUEST\x10\x90\x03\x12\x14\n\x0f\x45RROR_FORBIDDEN\x10\x93\x03\x12\x14\n\x0f\x45RROR_NOT_FOUND\x10\x94\x03\x12\x13\n\x0e\x45RROR_CONFLICT\x10\x99\x03\x12\x17\n\x12\x45RROR_SERVER_ERROR\x10\xf4\x03\x12\x1e\n\x19\x45RROR_SERVICE_UNAVAILABLE\x10\xf7\x03')
 
 
 
@@ -42,8 +42,8 @@ _RTPGENIPCMSGV1_REQUEST = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   options=None,
-  serialized_start=396,
-  serialized_end=451,
+  serialized_start=400,
+  serialized_end=455,
 )
 
 _RTPGENIPCMSGV1_RESPONSE = _descriptor.EnumDescriptor(
@@ -83,69 +83,69 @@ _RTPGENIPCMSGV1_RESPONSE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   options=None,
-  serialized_start=454,
-  serialized_end=624,
+  serialized_start=458,
+  serialized_end=628,
 )
 
 
-_RTPCONFIG = _descriptor.Descriptor(
-  name='RtpConfig',
-  full_name='RtpConfig',
+_RTPCONFIGV1 = _descriptor.Descriptor(
+  name='RtpConfigV1',
+  full_name='RtpConfigV1',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   fields=[
     _descriptor.FieldDescriptor(
-      name='enabled', full_name='RtpConfig.enabled', index=0,
+      name='enabled', full_name='RtpConfigV1.enabled', index=0,
       number=1, type=8, cpp_type=7, label=1,
       has_default_value=False, default_value=False,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='ip_dst_addr', full_name='RtpConfig.ip_dst_addr', index=1,
+      name='ip_dst_addr', full_name='RtpConfigV1.ip_dst_addr', index=1,
       number=3, type=13, cpp_type=3, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='ip_src_addr', full_name='RtpConfig.ip_src_addr', index=2,
+      name='ip_src_addr', full_name='RtpConfigV1.ip_src_addr', index=2,
       number=4, type=13, cpp_type=3, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='udp_dst_port', full_name='RtpConfig.udp_dst_port', index=3,
+      name='udp_dst_port', full_name='RtpConfigV1.udp_dst_port', index=3,
       number=5, type=13, cpp_type=3, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='udp_src_port', full_name='RtpConfig.udp_src_port', index=4,
+      name='udp_src_port', full_name='RtpConfigV1.udp_src_port', index=4,
       number=6, type=13, cpp_type=3, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='rtp_timestamp', full_name='RtpConfig.rtp_timestamp', index=5,
+      name='rtp_timestamp', full_name='RtpConfigV1.rtp_timestamp', index=5,
       number=7, type=13, cpp_type=3, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='rtp_sequence', full_name='RtpConfig.rtp_sequence', index=6,
+      name='rtp_sequence', full_name='RtpConfigV1.rtp_sequence', index=6,
       number=8, type=13, cpp_type=3, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='rtp_ssrc', full_name='RtpConfig.rtp_ssrc', index=7,
+      name='rtp_ssrc', full_name='RtpConfigV1.rtp_ssrc', index=7,
       number=9, type=13, cpp_type=3, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
@@ -161,7 +161,7 @@ _RTPCONFIG = _descriptor.Descriptor(
   is_extendable=False,
   extension_ranges=[],
   serialized_start=19,
-  serialized_end=196,
+  serialized_end=198,
 )
 
 
@@ -225,23 +225,23 @@ _RTPGENIPCMSGV1 = _descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=199,
-  serialized_end=624,
+  serialized_start=201,
+  serialized_end=628,
 )
 
 _RTPGENIPCMSGV1.fields_by_name['request_code'].enum_type = _RTPGENIPCMSGV1_REQUEST
 _RTPGENIPCMSGV1.fields_by_name['response_code'].enum_type = _RTPGENIPCMSGV1_RESPONSE
-_RTPGENIPCMSGV1.fields_by_name['rtp_config'].message_type = _RTPCONFIG
+_RTPGENIPCMSGV1.fields_by_name['rtp_config'].message_type = _RTPCONFIGV1
 _RTPGENIPCMSGV1_REQUEST.containing_type = _RTPGENIPCMSGV1;
 _RTPGENIPCMSGV1_RESPONSE.containing_type = _RTPGENIPCMSGV1;
-DESCRIPTOR.message_types_by_name['RtpConfig'] = _RTPCONFIG
+DESCRIPTOR.message_types_by_name['RtpConfigV1'] = _RTPCONFIGV1
 DESCRIPTOR.message_types_by_name['RtpgenIPCmsgV1'] = _RTPGENIPCMSGV1
 
-class RtpConfig(_message.Message):
+class RtpConfigV1(_message.Message):
   __metaclass__ = _reflection.GeneratedProtocolMessageType
-  DESCRIPTOR = _RTPCONFIG
+  DESCRIPTOR = _RTPCONFIGV1
 
-  # @@protoc_insertion_point(class_scope:RtpConfig)
+  # @@protoc_insertion_point(class_scope:RtpConfigV1)
 
 class RtpgenIPCmsgV1(_message.Message):
   __metaclass__ = _reflection.GeneratedProtocolMessageType

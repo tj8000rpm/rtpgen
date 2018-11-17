@@ -15,7 +15,7 @@ PROTOBUF_C__BEGIN_DECLS
 #endif
 
 
-typedef struct _RtpConfig RtpConfig;
+typedef struct _RtpConfigV1 RtpConfigV1;
 typedef struct _RtpgenIPCmsgV1 RtpgenIPCmsgV1;
 
 
@@ -41,7 +41,7 @@ typedef enum _RtpgenIPCmsgV1__Response {
 
 /* --- messages --- */
 
-struct  _RtpConfig
+struct  _RtpConfigV1
 {
   ProtobufCMessage base;
   protobuf_c_boolean has_enabled;
@@ -61,8 +61,8 @@ struct  _RtpConfig
   protobuf_c_boolean has_rtp_ssrc;
   uint32_t rtp_ssrc;
 };
-#define RTP_CONFIG__INIT \
- { PROTOBUF_C_MESSAGE_INIT (&rtp_config__descriptor) \
+#define RTP_CONFIG_V1__INIT \
+ { PROTOBUF_C_MESSAGE_INIT (&rtp_config_v1__descriptor) \
     , 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0 }
 
 
@@ -79,31 +79,31 @@ struct  _RtpgenIPCmsgV1
   int32_t id_selector;
   protobuf_c_boolean has_size;
   int32_t size;
-  RtpConfig *rtp_config;
+  RtpConfigV1 *rtp_config;
 };
 #define RTPGEN_IPCMSG_V1__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&rtpgen_ipcmsg_v1__descriptor) \
     , 0,0, 0,0, 0,0, 0,0, 0,0, NULL }
 
 
-/* RtpConfig methods */
-void   rtp_config__init
-                     (RtpConfig         *message);
-size_t rtp_config__get_packed_size
-                     (const RtpConfig   *message);
-size_t rtp_config__pack
-                     (const RtpConfig   *message,
+/* RtpConfigV1 methods */
+void   rtp_config_v1__init
+                     (RtpConfigV1         *message);
+size_t rtp_config_v1__get_packed_size
+                     (const RtpConfigV1   *message);
+size_t rtp_config_v1__pack
+                     (const RtpConfigV1   *message,
                       uint8_t             *out);
-size_t rtp_config__pack_to_buffer
-                     (const RtpConfig   *message,
+size_t rtp_config_v1__pack_to_buffer
+                     (const RtpConfigV1   *message,
                       ProtobufCBuffer     *buffer);
-RtpConfig *
-       rtp_config__unpack
+RtpConfigV1 *
+       rtp_config_v1__unpack
                      (ProtobufCAllocator  *allocator,
                       size_t               len,
                       const uint8_t       *data);
-void   rtp_config__free_unpacked
-                     (RtpConfig *message,
+void   rtp_config_v1__free_unpacked
+                     (RtpConfigV1 *message,
                       ProtobufCAllocator *allocator);
 /* RtpgenIPCmsgV1 methods */
 void   rtpgen_ipcmsg_v1__init
@@ -126,8 +126,8 @@ void   rtpgen_ipcmsg_v1__free_unpacked
                       ProtobufCAllocator *allocator);
 /* --- per-message closures --- */
 
-typedef void (*RtpConfig_Closure)
-                 (const RtpConfig *message,
+typedef void (*RtpConfigV1_Closure)
+                 (const RtpConfigV1 *message,
                   void *closure_data);
 typedef void (*RtpgenIPCmsgV1_Closure)
                  (const RtpgenIPCmsgV1 *message,
@@ -138,7 +138,7 @@ typedef void (*RtpgenIPCmsgV1_Closure)
 
 /* --- descriptors --- */
 
-extern const ProtobufCMessageDescriptor rtp_config__descriptor;
+extern const ProtobufCMessageDescriptor rtp_config_v1__descriptor;
 extern const ProtobufCMessageDescriptor rtpgen_ipcmsg_v1__descriptor;
 extern const ProtobufCEnumDescriptor    rtpgen_ipcmsg_v1__request__descriptor;
 extern const ProtobufCEnumDescriptor    rtpgen_ipcmsg_v1__response__descriptor;
