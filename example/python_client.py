@@ -171,7 +171,7 @@ def help():
 ''')                                                             
 
 s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-s.connect(('localhost',55077))
+s.connect(('localhost',7700))
 
 help()
 

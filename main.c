@@ -1489,7 +1489,7 @@ main(int argc, char **argv)
 
 	memset(&addr,0,sizeof(struct sockaddr_in));
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons(55077);
+	addr.sin_port = htons(7700);
 
 	bind(sock, (struct sockaddr *)&addr, sizeof(addr));
 
@@ -1499,7 +1499,7 @@ main(int argc, char **argv)
 	p_socket_main_thread=&socket_main_thread;
 	if (ret != 0){
 		rte_exit(EXIT_FAILURE,
-			"Could not bind controllers tcp port(0.0.0.0:55077).\n");
+			"Could not bind controllers tcp port(0.0.0.0:7700).\n");
 	}
 
 	ret = 0;
