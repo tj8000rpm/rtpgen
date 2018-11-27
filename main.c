@@ -155,7 +155,6 @@ typedef struct rtpgen_ethIpUdpHdr_s {
 	struct udp_hdr udp;
 } rtpgen_ethIpUdpHdr_t __attribute__((__packed__));
 
-//rtpgen_ethIpUdpHdr_t constantHeaders[RTPGEN_RTP_MAX_SESSIONS];
 rtpgen_ethIpUdpHdr_t *constantHeaders[RTE_MAX_ETHPORTS];
 struct rtpgen_rtp_config *rtp_configs_per_port[RTE_MAX_ETHPORTS];
 
@@ -241,7 +240,7 @@ print_stats(void)
 
 // 送信タイミングでのpacketの生成
 static unsigned
-rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts, unsigned count){
+rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts,unsigned *activeids, unsigned count){
 	struct rtpgen_rtp_hdr *rtp;
 	struct rte_mbuf *m;
 	uint8_t *payload;
@@ -257,13 +256,12 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts, unsigned count){
 	
 	rtp_conf=rtp_configs_per_port[portid];
 	
-	for(i=0,sessionid=0;i<rtpgen_sessions;i++){
-		/* bulk_allocで確保した領域を超えないように */
-		if(!rtp_conf[i].enabled || sessionid > count)
-			continue;
-		m=pkts[sessionid];
+	for(i=0;i<count;i++){
+		sessionid=activeids[i];
+
+		m=pkts[i];
 		rte_memcpy((uint8_t *)m->buf_addr + m->data_off,
-			   (uint8_t *)&(constantHeaders[portid][i]), sizeof(rtpgen_ethIpUdpHdr_t));
+			   (uint8_t *)&(constantHeaders[portid][sessionid]), sizeof(rtpgen_ethIpUdpHdr_t));
 		m->data_len=sizeof(rtpgen_ethIpUdpHdr_t);
 		m->pkt_len =sizeof(rtpgen_ethIpUdpHdr_t);
 
@@ -282,31 +280,24 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts, unsigned count){
 		                            (rtp_ccrc_count  &0xf ) <<  8 |
 		                            (rtp_marker      &0x1 ) <<  7 |
 		                            (rtp_payload_type&0x7f)        );
-		rtp->sequence =rte_be_to_cpu_16(rtp_conf[i].rtp_sequence);
-		rtp->timestamp=rte_be_to_cpu_32(rtp_conf[i].rtp_timestamp);
-		rtp->ssrc     =rte_be_to_cpu_32(rtp_conf[i].rtp_ssrc);
+		rtp->sequence =rte_be_to_cpu_16(rtp_conf[sessionid].rtp_sequence);
+		rtp->timestamp=rte_be_to_cpu_32(rtp_conf[sessionid].rtp_timestamp);
+		rtp->ssrc     =rte_be_to_cpu_32(rtp_conf[sessionid].rtp_ssrc);
 
 		// append Payload data;
 		payload=(uint8_t *)rte_pktmbuf_append(m,sizeof(uint8_t)*RTPGEN_RTP_PAYLOAD_LEN);
-		payload_idx=rtp_conf[i].rtp_sequence;
+		payload_idx=rtp_conf[sessionid].rtp_sequence;
 		payload_idx*=RTPGEN_RTP_PAYLOAD_LEN;
 		payload_idx%=rtpgen_payload_data_len;
 
 		rte_memcpy((uint8_t *)payload,
 		           (uint8_t *)&(rtpgen_payload_data)+payload_idx, RTPGEN_RTP_PAYLOAD_LEN);
 
-		rtp_conf[i].rtp_timestamp+=RTPGEN_RTP_PAYLOAD_LEN;
-		rtp_conf[i].rtp_sequence+=1;
-		sessionid++;
+		rtp_conf[sessionid].rtp_timestamp+=RTPGEN_RTP_PAYLOAD_LEN;
+		rtp_conf[sessionid].rtp_sequence+=1;
 	}
-	/* 
-	 * パケット生成途中にあるリソースがdisableになった場合のメモリリーク対策
-	 * ホンマに効果あるかは微妙・・・？
-	 */
-	for(i=sessionid;i<count;i++)
-		rte_pktmbuf_free(pkts[i]);
 	
-	return sessionid;
+	return count;
 }
 
 /* RTPペイロードデータのよみこみ */
@@ -370,12 +361,13 @@ static void
 rtpgen_main_loop(void){
 	int sent;
 	unsigned lcore_id;
-	unsigned int rtpgen_active_sessions = 0;
 	uint64_t prev_tsc, diff_tsc, cur_tsc, timer_tsc;
 	uint64_t rtpgen_rtp_timer_tsc,
 		 rtpgen_prev_tsc;
 	unsigned i, j, portid, sessionid, cur_sessionid;
 	struct lcore_queue_conf *qconf;
+	unsigned active_sessions[RTPGEN_RTP_MAX_SESSIONS];
+	unsigned int nb_active_sessions = 0;
 
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
 			BURST_TX_DRAIN_US;
@@ -492,27 +484,25 @@ rtpgen_main_loop(void){
 					// rxqueueのport_idを取得
 					portid = qconf->rx_port_list[i];
 					if(cur_sessionid == 0){
-						rtpgen_active_sessions=0;
+						nb_active_sessions=0;
 						for(j=0;j<rtpgen_sessions;j++)
 							if(rtp_configs_per_port[portid][j].enabled)
-								rtpgen_active_sessions++;
-						if(rte_pktmbuf_alloc_bulk(l2fwd_pktmbuf_pool, tx_bursts, rtpgen_active_sessions)!=0)
+								active_sessions[nb_active_sessions++]=j;
+						if(rte_pktmbuf_alloc_bulk(l2fwd_pktmbuf_pool, tx_bursts, nb_active_sessions)!=0)
 							continue;
 						
 						rtpgen_prev_tsc=cur_tsc;
-						rtpgen_active_sessions=rtpgen_setup_newpacket(portid, tx_bursts, rtpgen_active_sessions);
+						nb_active_sessions=rtpgen_setup_newpacket(portid, tx_bursts, active_sessions, nb_active_sessions);
 					}
 				
 					for (sessionid=cur_sessionid;
-						//sessionid<cur_sessionid+32 && sessionid<rtpgen_sessions;
-						sessionid<cur_sessionid+32 && sessionid<rtpgen_active_sessions;
+						sessionid<cur_sessionid+32 && sessionid<nb_active_sessions;
 						sessionid++){
 						sent = rte_eth_tx_buffer(portid, 0, tx_buffer[portid], tx_bursts[sessionid]);
 						if (sent)
 							port_statistics[portid].tx += sent;
 					}
-					//if(sessionid >= rtpgen_sessions){
-					if(sessionid >= rtpgen_active_sessions){
+					if(sessionid >= nb_active_sessions){
 						rtpgen_rtp_timer_tsc=cur_tsc-rtpgen_prev_tsc;
 						cur_sessionid=0;
 					}else{
@@ -1087,7 +1077,6 @@ void thread_loop(struct socket_info *info){
 	int ssock;
 	struct sockaddr_in client;
 	unsigned client_addr_len;
-	//pthread_t threads[MAX_SESSIONS];
 
 	sock=info->sock;
 	printf("socket opened\n");
@@ -1156,6 +1145,7 @@ main(int argc, char **argv)
 	
 	struct socket_info sinfo;
 	int sock = -1;
+	int optyes = 1;
 	
 	/* init EAL */
 	ret = rte_eal_init(argc, argv);
@@ -1191,7 +1181,7 @@ main(int argc, char **argv)
 	//   from NTT-Nakamuraさんのスライドから
 	//l2fwd_pktmbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", NB_MBUF,
 	printf("--- %d\n",(unsigned)(rtpgen_sessions*1.15));
-	l2fwd_pktmbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", 512,
+	l2fwd_pktmbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", n_mbuf_pool,
 		MEMPOOL_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE,
 		rte_socket_id());
 	
@@ -1484,6 +1474,9 @@ main(int argc, char **argv)
 
 	/* Bind controllers endpoint */
 	sock = socket(AF_INET,  SOCK_STREAM, 0);
+	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optyes, sizeof(int));
+	setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &optyes, sizeof(int));
+
 	sinfo.sock=sock;
 	sinfo.ssock=0;
 

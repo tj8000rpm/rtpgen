@@ -52,6 +52,7 @@ CFLAGS += -I$(SRCDIR)
 CFLAGS += -O3
 CFLAGS += $(WERROR_FLAGS)
 CFLAGS += -lprotobuf-c
+CFLAGS += -g
 
 
 include $(RTE_SDK)/mk/rte.extapp.mk
