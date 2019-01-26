@@ -6,7 +6,6 @@ rtp traffic generator powerd by dpdk
 ## TODO
 ### Setting Options
 - MAC address peer
-- payload size(currently fixed value of 200 byte)
 - payload type(currently fixed value of g.711)
 
 ### Features

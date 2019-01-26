@@ -126,9 +126,16 @@ struct l2fwd_port_statistics port_statistics[RTE_MAX_ETHPORTS];
 
 #define RTPGEN_MAXFILENAME 256
 #define RTPGEN_RTP_MAX_SESSIONS 50000
-#define RTPGEN_RTP_TX_INTERVAL_US 20000 /* TX rtp packet every ~20ms = ~20000us */
-#define RTPGEN_RTP_PAYLOAD_LEN 160
-#define RTPGEN_RTP_PAYLOAD_MAX_LEN RTPGEN_RTP_PAYLOAD_LEN * 50 * 30
+#define RTPGEN_DEFAULT_RTP_TX_INTERVAL_US 20000 /* TX rtp packet every ~20ms = ~20000us */
+#define RTPGEN_DEFAULT_RTP_PAYLOAD_LEN 160
+#define RTPGEN_RTP_MAX_PAYLOAD_LEN 800
+#define RTPGEN_RTP_PAYLOAD_FILE_MAX_TIME_S 30
+#define RTPGEN_RTP_MAX_FILE_LEN RTPGEN_DEFAULT_RTP_PAYLOAD_LEN *\
+								   (1000000 / RTPGEN_DEFAULT_RTP_TX_INTERVAL_US) *\
+								   RTPGEN_RTP_PAYLOAD_FILE_MAX_TIME_S // u-lawで30秒分
+
+unsigned rtpgen_rtp_tx_interval_us          = RTPGEN_DEFAULT_RTP_TX_INTERVAL_US;
+unsigned rtpgen_rtp_payload_len             = RTPGEN_DEFAULT_RTP_PAYLOAD_LEN;
 
 struct rtpgen_rtp_hdr {
 	uint16_t flags;
@@ -159,9 +166,9 @@ rtpgen_ethIpUdpHdr_t *constantHeaders[RTE_MAX_ETHPORTS];
 struct rtpgen_rtp_config *rtp_configs_per_port[RTE_MAX_ETHPORTS];
 
 static unsigned int rtpgen_sessions = 1;
-static unsigned int rtpgen_payload_data_len = RTPGEN_RTP_PAYLOAD_LEN;
-// メモリコピーを行うため。循環時にオーバフローしないようにRTPパケットサイズ分だけ追加
-static uint8_t rtpgen_payload_data[RTPGEN_RTP_PAYLOAD_MAX_LEN + RTPGEN_RTP_PAYLOAD_LEN];
+static unsigned int rtpgen_payload_data_len = RTPGEN_DEFAULT_RTP_PAYLOAD_LEN * 2;
+// メモリコピーを行うため。循環時にオーバフローしないように2倍の領域を確保
+static uint8_t rtpgen_payload_data[RTPGEN_RTP_MAX_FILE_LEN * 2];
 
 static char rtpgen_payload_filename[RTPGEN_MAXFILENAME];
 
@@ -285,15 +292,15 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts,unsigned *activei
 		rtp->ssrc     =rte_be_to_cpu_32(rtp_conf[sessionid].rtp_ssrc);
 
 		// append Payload data;
-		payload=(uint8_t *)rte_pktmbuf_append(m,sizeof(uint8_t)*RTPGEN_RTP_PAYLOAD_LEN);
+		payload=(uint8_t *)rte_pktmbuf_append(m,sizeof(uint8_t)*rtpgen_rtp_payload_len);
 		payload_idx=rtp_conf[sessionid].rtp_sequence;
-		payload_idx*=RTPGEN_RTP_PAYLOAD_LEN;
+		payload_idx*=rtpgen_rtp_payload_len;
 		payload_idx%=rtpgen_payload_data_len;
 
 		rte_memcpy((uint8_t *)payload,
-		           (uint8_t *)&(rtpgen_payload_data)+payload_idx, RTPGEN_RTP_PAYLOAD_LEN);
+		           (uint8_t *)&(rtpgen_payload_data)+payload_idx, rtpgen_rtp_payload_len);
 
-		rtp_conf[sessionid].rtp_timestamp+=RTPGEN_RTP_PAYLOAD_LEN;
+		rtp_conf[sessionid].rtp_timestamp+=rtpgen_rtp_payload_len;
 		rtp_conf[sessionid].rtp_sequence+=1;
 	}
 	
@@ -307,7 +314,7 @@ rtpgen_set_payload_data(void){
 	unsigned i, size;
 
 	// data flush
-	memset(rtpgen_payload_data, 0, sizeof(char)*RTPGEN_RTP_PAYLOAD_MAX_LEN);
+	memset(rtpgen_payload_data, 0, sizeof(char)*RTPGEN_RTP_MAX_FILE_LEN);
 
 	//rtpgen_payload_data={
 	uint8_t default_data[]={
@@ -332,20 +339,20 @@ rtpgen_set_payload_data(void){
 			0x86,0x87,0x8b,0x87,0x9f,0x91,0x1f,0xff, // 152
 			0x0b,0x11,0x06,0x07,0x0b,0x07,0x1f,0x11	 // 160
 		};
-	for(i=0;i<RTPGEN_RTP_PAYLOAD_LEN+RTPGEN_RTP_PAYLOAD_LEN;i++){
-		rtpgen_payload_data[i]=default_data[i%RTPGEN_RTP_PAYLOAD_LEN];
+	for(i=0;i<rtpgen_rtp_payload_len+rtpgen_rtp_payload_len;i++){
+		rtpgen_payload_data[i]=default_data[i%rtpgen_rtp_payload_len];
 	}
-	rtpgen_payload_data_len=RTPGEN_RTP_PAYLOAD_LEN;
+	rtpgen_payload_data_len=rtpgen_rtp_payload_len;
 
 	if ( strcmp(rtpgen_payload_filename, "")!= 0) {
 		fp=fopen(rtpgen_payload_filename, "rb");
 		if(fp!=NULL){
-			size=fread(&rtpgen_payload_data, sizeof(uint8_t), RTPGEN_RTP_PAYLOAD_MAX_LEN, fp);
+			size=fread(&rtpgen_payload_data, sizeof(uint8_t), RTPGEN_RTP_MAX_FILE_LEN, fp);
 			if(size==0)
 				return;
 			rtpgen_payload_data_len=size;
 
-			for(i=0;i<RTPGEN_RTP_PAYLOAD_LEN;i++)
+			for(i=0;i<rtpgen_rtp_payload_len;i++)
 				rtpgen_payload_data[rtpgen_payload_data_len+i]=rtpgen_payload_data[i];
 			
 			fclose(fp);
@@ -379,7 +386,7 @@ rtpgen_main_loop(void){
 	timer_tsc = 0;
 	rtpgen_rtp_timer_tsc = 0;
 	const uint64_t rtpgen_rtp_tx_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
-			(RTPGEN_RTP_TX_INTERVAL_US - 2*BURST_TX_DRAIN_US);
+			(rtpgen_rtp_tx_interval_us - 2*BURST_TX_DRAIN_US);
 
 	lcore_id = rte_lcore_id();
 	// coreごとのqueue情報の確認
@@ -477,7 +484,7 @@ rtpgen_main_loop(void){
 			rtpgen_rtp_timer_tsc += diff_tsc;
 
 			/* 上記要領に習い、パケット化周期単位でパケットを送信 */
-			// RTPGEN_RTP_TX_INTERVAL_US = pkt化周期
+			// rtpgen_rtp_tx_interval_us = pkt化周期
 			/* if timer has reached  */
 			if (unlikely( rtpgen_rtp_timer_tsc >= rtpgen_rtp_tx_tsc )){
 				for (i = 0; i < qconf->n_rx_port; i++) {
@@ -535,11 +542,14 @@ rtpgen_usage(const char *prgname)
 	printf("%s [EAL options] -- -p PORTMASK [-q NQ]\n"
 	       "  -p PORTMASK: hexadecimal bitmask of ports to configure\n"
 	       "  -q NQ: number of queue (=ports) per lcore (default is 1)\n"
-	       "  -T PERIOD: statistics will be refreshed each PERIOD seconds (0 to disable, 10 default, 86400 maximum)\n"
+	       "  -T PERIOD: statistics will be refreshed each PERIOD seconds\n"
+		   "             (0 to disable, 10 default, 86400 maximum)\n"
 	       "  -s SESSIONS: number of rtp sessions\n"
-	       "  -b BUFFER: number of mbuf pool size(8192 default, 57344 maximum)\n"
+	       "  -b BUFFER: number of mbuf pool size(%d default, %d maximum)\n"
 	       "  -f FILE: select rtp payload file(expected no header rtp file)\n",
-	       prgname);
+	       "  -P SIZE: rtp payload size(%d default, %d maximum)\n",
+	       prgname, NB_MBUF, MAX_NB_MBUF, RTPGEN_DEFAULT_RTP_PAYLOAD_LEN,
+		   RTPGEN_RTP_MAX_PAYLOAD_LEN);
 }
 
 static int
@@ -559,8 +569,9 @@ rtpgen_parse_portmask(const char *portmask)
 	return pm;
 }
 
+
 static unsigned int
-rtpgen_parse_nqueue(const char *q_arg)
+rtpgen_parse_number(const char *q_arg, unsigned lower, unsigned upper)
 {
 	char *end = NULL;
 	unsigned long n;
@@ -569,62 +580,10 @@ rtpgen_parse_nqueue(const char *q_arg)
 	n = strtoul(q_arg, &end, 10);
 	if ((q_arg[0] == '\0') || (end == NULL) || (*end != '\0'))
 		return 0;
-	if (n == 0)
+	if (n <= lower)
 		return 0;
-	if (n >= MAX_RX_QUEUE_PER_LCORE)
+	if (n > upper)
 		return 0;
-
-	return n;
-}
-
-static unsigned int
-rtpgen_parse_nmbufpool(const char *q_arg)
-{
-	char *end = NULL;
-	unsigned long n;
-
-	/* parse hexadecimal string */
-	n = strtoul(q_arg, &end, 10);
-	if ((q_arg[0] == '\0') || (end == NULL) || (*end != '\0'))
-		return 0;
-	if (n == 0)
-		return 0;
-	if (n > MAX_NB_MBUF)
-		return 0;
-
-	return n;
-}
-
-static unsigned int
-rtpgen_parse_nsesisons(const char *q_arg)
-{
-	char *end = NULL;
-	unsigned long n;
-
-	/* parse hexadecimal string */
-	n = strtoul(q_arg, &end, 10);
-	if ((q_arg[0] == '\0') || (end == NULL) || (*end != '\0'))
-		return 0;
-	if (n == 0)
-		return 0;
-	if (n > RTPGEN_RTP_MAX_SESSIONS)
-		return 0;
-
-	return n;
-}
-
-static int
-rtpgen_parse_timer_period(const char *q_arg)
-{
-	char *end = NULL;
-	int n;
-
-	/* parse number string */
-	n = strtol(q_arg, &end, 10);
-	if ((q_arg[0] == '\0') || (end == NULL) || (*end != '\0'))
-		return -1;
-	if (n >= MAX_TIMER_PERIOD)
-		return -1;
 
 	return n;
 }
@@ -643,6 +602,7 @@ static const char short_options[] =
 	"s:"  /* number of sessions */
 	"f:"  /* payload data use file */
 	"b:"  /* number of mbuf pool */
+	"P:"  /* payload size */
 	;
 
 enum {
@@ -680,7 +640,7 @@ rtpgen_parse_args(int argc, char **argv)
 
 		/* nqueue */
 		case 'q':
-			l2fwd_rx_queue_per_lcore = rtpgen_parse_nqueue(optarg);
+			l2fwd_rx_queue_per_lcore = rtpgen_parse_number(optarg, 0, MAX_RX_QUEUE_PER_LCORE);
 			if (l2fwd_rx_queue_per_lcore == 0) {
 				printf("invalid queue number\n");
 				rtpgen_usage(prgname);
@@ -690,7 +650,7 @@ rtpgen_parse_args(int argc, char **argv)
 
 		/* timer period */
 		case 'T':
-			timer_secs = rtpgen_parse_timer_period(optarg);
+			timer_secs = rtpgen_parse_number(optarg, -1, MAX_TIMER_PERIOD);
 			if (timer_secs < 0) {
 				printf("invalid timer period\n");
 				rtpgen_usage(prgname);
@@ -701,7 +661,7 @@ rtpgen_parse_args(int argc, char **argv)
 
 		/* number of mbuf pool */
 		case 'b':
-			n_mbuf_pool = rtpgen_parse_nmbufpool(optarg);
+			n_mbuf_pool = rtpgen_parse_number(optarg, 0, MAX_NB_MBUF);
 			if (rtpgen_sessions == 0) {
 				printf("invalid mbuf pool size\n");
 				rtpgen_usage(prgname);
@@ -711,7 +671,7 @@ rtpgen_parse_args(int argc, char **argv)
 
 		/* number of sessions */
 		case 's':
-			rtpgen_sessions = rtpgen_parse_nsesisons(optarg);
+			rtpgen_sessions = rtpgen_parse_number(optarg, 0, RTPGEN_RTP_MAX_SESSIONS);
 			if (rtpgen_sessions == 0) {
 				printf("invalid session number\n");
 				rtpgen_usage(prgname);
@@ -724,6 +684,16 @@ rtpgen_parse_args(int argc, char **argv)
 			rtpgen_parse_filename(optarg, rtpgen_payload_filename);
 			if ( strcmp(rtpgen_payload_filename, "")== 0) {
 				printf("invalid filename\n");
+				rtpgen_usage(prgname);
+				return -1;
+			}
+			break;
+
+		/* payload size */
+		case 'P':
+			rtpgen_rtp_payload_len = rtpgen_parse_number(optarg, 0, RTPGEN_RTP_MAX_PAYLOAD_LEN);
+			if (rtpgen_rtp_payload_len == 0) {
+				printf("invalid payload size\n");
 				rtpgen_usage(prgname);
 				return -1;
 			}
@@ -1295,6 +1265,8 @@ main(int argc, char **argv)
 		// 各ポートのmac addrを取得
 		rte_eth_macaddr_get(portid,&l2fwd_ports_eth_addr[portid]);
 
+		// Set a destination mac addr
+		// TODO: setting from config
 		l2fwd_ports_eth_peer_addr[portid].addr_bytes[0]=0x20;
 		l2fwd_ports_eth_peer_addr[portid].addr_bytes[1]=0x00;
 		l2fwd_ports_eth_peer_addr[portid].addr_bytes[2]=0x00;
@@ -1403,7 +1375,7 @@ main(int argc, char **argv)
 			tmp_set[i].udp_dst_port=6000+1000*portid+i;
 			tmp_set[i].udp_src_port=8000+1000*portid+i;
 			
-			len=RTPGEN_RTP_PAYLOAD_LEN + sizeof(struct rtpgen_rtp_hdr);
+			len=rtpgen_rtp_payload_len + sizeof(struct rtpgen_rtp_hdr);
 			len+=sizeof(struct udp_hdr);
 			constantHeaders[portid][i].udp.src_port=rte_be_to_cpu_16(8000+1000*portid+i);
 			constantHeaders[portid][i].udp.dst_port=rte_be_to_cpu_16(6000+1000*portid+i);
