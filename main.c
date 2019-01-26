@@ -124,6 +124,7 @@ struct l2fwd_port_statistics port_statistics[RTE_MAX_ETHPORTS];
  * 
  *///////////////////////////////////////////////////////////////////////////////
 
+#define RTPGEN_RTP_PT_PCMU 0
 #define RTPGEN_MAXFILENAME 256
 #define RTPGEN_RTP_MAX_SESSIONS 50000
 #define RTPGEN_DEFAULT_RTP_TX_INTERVAL_US 20000 /* TX rtp packet every ~20ms = ~20000us */
@@ -134,8 +135,9 @@ struct l2fwd_port_statistics port_statistics[RTE_MAX_ETHPORTS];
 								   (1000000 / RTPGEN_DEFAULT_RTP_TX_INTERVAL_US) *\
 								   RTPGEN_RTP_PAYLOAD_FILE_MAX_TIME_S // u-lawで30秒分
 
-unsigned rtpgen_rtp_tx_interval_us          = RTPGEN_DEFAULT_RTP_TX_INTERVAL_US;
-unsigned rtpgen_rtp_payload_len             = RTPGEN_DEFAULT_RTP_PAYLOAD_LEN;
+unsigned rtpgen_rtp_tx_interval_us = RTPGEN_DEFAULT_RTP_TX_INTERVAL_US;
+unsigned rtpgen_rtp_payload_len    = RTPGEN_DEFAULT_RTP_PAYLOAD_LEN;
+uint8_t  rtpgen_rtp_pt             = RTPGEN_RTP_PT_PCMU;
 
 struct rtpgen_rtp_hdr {
 	uint16_t flags;
@@ -257,7 +259,6 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts,unsigned *activei
 	uint8_t rtp_extention;
 	uint8_t rtp_ccrc_count;
 	uint8_t rtp_marker;
-	uint8_t rtp_payload_type;
 	unsigned sessionid, i;
 	struct rtpgen_rtp_config *rtp_conf;
 	
@@ -280,13 +281,12 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts,unsigned *activei
 		rtp_extention=0;
 		rtp_ccrc_count=0;
 		rtp_marker=0;
-		rtp_payload_type=0;
-		rtp->flags=rte_be_to_cpu_16((rtp_version     &0x3 ) << 14 |
-		                            (rtp_padding     &0x1 ) << 13 |
-		                            (rtp_extention   &0x1 ) << 12 |
-		                            (rtp_ccrc_count  &0xf ) <<  8 |
-		                            (rtp_marker      &0x1 ) <<  7 |
-		                            (rtp_payload_type&0x7f)        );
+		rtp->flags=rte_be_to_cpu_16((rtp_version    &0x3 ) << 14 |
+		                            (rtp_padding    &0x1 ) << 13 |
+		                            (rtp_extention  &0x1 ) << 12 |
+		                            (rtp_ccrc_count &0xf ) <<  8 |
+		                            (rtp_marker     &0x1 ) <<  7 |
+		                            (rtpgen_rtp_pt  &0x7f)        );
 		rtp->sequence =rte_be_to_cpu_16(rtp_conf[sessionid].rtp_sequence);
 		rtp->timestamp=rte_be_to_cpu_32(rtp_conf[sessionid].rtp_timestamp);
 		rtp->ssrc     =rte_be_to_cpu_32(rtp_conf[sessionid].rtp_ssrc);
@@ -546,10 +546,11 @@ rtpgen_usage(const char *prgname)
 		   "             (0 to disable, 10 default, 86400 maximum)\n"
 	       "  -s SESSIONS: number of rtp sessions\n"
 	       "  -b BUFFER: number of mbuf pool size(%d default, %d maximum)\n"
-	       "  -f FILE: select rtp payload file(expected no header rtp file)\n",
-	       "  -P SIZE: rtp payload size(%d default, %d maximum)\n",
+	       "  -f FILE: select rtp payload file(expected no header rtp file)\n"
+	       "  -P SIZE: rtp payload size(%d default, %d maximum)\n"
+	       "  -t PAYLOAD_TYPE: rtp payload type(%d(PCMU) default)\n",
 	       prgname, NB_MBUF, MAX_NB_MBUF, RTPGEN_DEFAULT_RTP_PAYLOAD_LEN,
-		   RTPGEN_RTP_MAX_PAYLOAD_LEN);
+		   RTPGEN_RTP_MAX_PAYLOAD_LEN, RTPGEN_RTP_PT_PCMU);
 }
 
 static int
@@ -570,20 +571,20 @@ rtpgen_parse_portmask(const char *portmask)
 }
 
 
-static unsigned int
-rtpgen_parse_number(const char *q_arg, unsigned lower, unsigned upper)
+static int
+rtpgen_parse_number(const char *q_arg, int lower, int upper, int err)
 {
 	char *end = NULL;
-	unsigned long n;
+	int n;
 
 	/* parse hexadecimal string */
 	n = strtoul(q_arg, &end, 10);
 	if ((q_arg[0] == '\0') || (end == NULL) || (*end != '\0'))
-		return 0;
+		return err;
 	if (n <= lower)
-		return 0;
+		return err;
 	if (n > upper)
-		return 0;
+		return err;
 
 	return n;
 }
@@ -603,6 +604,7 @@ static const char short_options[] =
 	"f:"  /* payload data use file */
 	"b:"  /* number of mbuf pool */
 	"P:"  /* payload size */
+	"t:"  /* payload type */
 	;
 
 enum {
@@ -640,7 +642,7 @@ rtpgen_parse_args(int argc, char **argv)
 
 		/* nqueue */
 		case 'q':
-			l2fwd_rx_queue_per_lcore = rtpgen_parse_number(optarg, 0, MAX_RX_QUEUE_PER_LCORE);
+			l2fwd_rx_queue_per_lcore = rtpgen_parse_number(optarg, 0, MAX_RX_QUEUE_PER_LCORE, 0);
 			if (l2fwd_rx_queue_per_lcore == 0) {
 				printf("invalid queue number\n");
 				rtpgen_usage(prgname);
@@ -650,7 +652,7 @@ rtpgen_parse_args(int argc, char **argv)
 
 		/* timer period */
 		case 'T':
-			timer_secs = rtpgen_parse_number(optarg, -1, MAX_TIMER_PERIOD);
+			timer_secs = rtpgen_parse_number(optarg, -1, MAX_TIMER_PERIOD, -1);
 			if (timer_secs < 0) {
 				printf("invalid timer period\n");
 				rtpgen_usage(prgname);
@@ -661,7 +663,7 @@ rtpgen_parse_args(int argc, char **argv)
 
 		/* number of mbuf pool */
 		case 'b':
-			n_mbuf_pool = rtpgen_parse_number(optarg, 0, MAX_NB_MBUF);
+			n_mbuf_pool = rtpgen_parse_number(optarg, 0, MAX_NB_MBUF, 0);
 			if (rtpgen_sessions == 0) {
 				printf("invalid mbuf pool size\n");
 				rtpgen_usage(prgname);
@@ -671,7 +673,7 @@ rtpgen_parse_args(int argc, char **argv)
 
 		/* number of sessions */
 		case 's':
-			rtpgen_sessions = rtpgen_parse_number(optarg, 0, RTPGEN_RTP_MAX_SESSIONS);
+			rtpgen_sessions = rtpgen_parse_number(optarg, 0, RTPGEN_RTP_MAX_SESSIONS, 0);
 			if (rtpgen_sessions == 0) {
 				printf("invalid session number\n");
 				rtpgen_usage(prgname);
@@ -691,9 +693,19 @@ rtpgen_parse_args(int argc, char **argv)
 
 		/* payload size */
 		case 'P':
-			rtpgen_rtp_payload_len = rtpgen_parse_number(optarg, 0, RTPGEN_RTP_MAX_PAYLOAD_LEN);
+			rtpgen_rtp_payload_len = rtpgen_parse_number(optarg, 0, RTPGEN_RTP_MAX_PAYLOAD_LEN, 0);
 			if (rtpgen_rtp_payload_len == 0) {
 				printf("invalid payload size\n");
+				rtpgen_usage(prgname);
+				return -1;
+			}
+			break;
+
+		/* payload type */
+		case 't':
+			rtpgen_rtp_pt = (uint8_t)rtpgen_parse_number(optarg, -1, 127, 255);
+			if (rtpgen_rtp_pt == 255) {
+				printf("invalid payload type\n");
 				rtpgen_usage(prgname);
 				return -1;
 			}

@@ -6,7 +6,6 @@ rtp traffic generator powerd by dpdk
 ## TODO
 ### Setting Options
 - MAC address peer
-- payload type(currently fixed value of g.711)
 
 ### Features
 - Multiport support
