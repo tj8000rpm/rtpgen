@@ -176,6 +176,8 @@ static char rtpgen_payload_filename[RTPGEN_MAXFILENAME];
 
 static unsigned int n_mbuf_pool = NB_MBUF;
 
+static uint8_t use_default_mac_peer = true;
+
 int pt_th=0;
 pthread_t *p_socket_main_thread=NULL;
 pthread_t socket_main_thread;
@@ -545,6 +547,7 @@ rtpgen_usage(const char *prgname)
 	       "  -T PERIOD: statistics will be refreshed each PERIOD seconds\n"
 		   "             (0 to disable, 10 default, 86400 maximum)\n"
 	       "  -s SESSIONS: number of rtp sessions\n"
+	       "  -M PORT0_MACPEER,PORT1_MACPEER,...,PORTn_MACPEER: Peer MAC address for each port\n"
 	       "  -b BUFFER: number of mbuf pool size(%d default, %d maximum)\n"
 	       "  -f FILE: select rtp payload file(expected no header rtp file)\n"
 	       "  -P SIZE: rtp payload size(%d default, %d maximum)\n"
@@ -589,9 +592,46 @@ rtpgen_parse_number(const char *q_arg, int lower, int upper, int err)
 	return n;
 }
 
-static void
-rtpgen_parse_filename(const char *q_arg, char *filename)
-{
+static int
+rtpgen_parse_macaddr(char *q_arg) {
+
+	uint32_t n=0;
+	char *end = NULL;
+	int i, port, s_ptr;
+	char *tmp, *tmp2;
+	char c;
+
+	for(s_ptr = 0, port = 0, i = 0; i < 256; i++){
+		c = q_arg[i];
+		if(c==',' || c=='\0'){
+			if(port>=RTE_MAX_ETHPORTS) return 0;
+
+			q_arg[i] = '\0';
+			tmp = q_arg + s_ptr;
+			s_ptr = i+1;
+
+			for(i = 0; i < 6; i++){
+				tmp2 = strtok(tmp, ":");
+				if(tmp2 == NULL) return 0;
+
+				n = strtoul(tmp2, &end, 16);
+				if ((q_arg[0] == '\0') || (end == NULL) || (*end != '\0'))
+					return 0;
+				if (n > 0xff)
+					return 0;
+				l2fwd_ports_eth_peer_addr[port].addr_bytes[i]=n;
+
+				tmp = NULL;
+			}
+			port++;
+
+			if(c=='\0') break;
+		}
+	}
+	return 1;
+}
+
+static void rtpgen_parse_filename(const char *q_arg, char *filename) {
 	strcpy(filename, q_arg);
 }
 
@@ -605,6 +645,7 @@ static const char short_options[] =
 	"b:"  /* number of mbuf pool */
 	"P:"  /* payload size */
 	"t:"  /* payload type */
+	"M:"  /* MAC Address peers */
 	;
 
 enum {
@@ -619,7 +660,7 @@ enum {
 static int
 rtpgen_parse_args(int argc, char **argv)
 {
-	int opt, ret, timer_secs;
+	int opt, ret, timer_secs, macret;
 	char **argvopt;
 	int option_index;
 	char *prgname = argv[0];
@@ -709,6 +750,17 @@ rtpgen_parse_args(int argc, char **argv)
 				rtpgen_usage(prgname);
 				return -1;
 			}
+			break;
+
+		/* Mac peer address */
+		case 'M':
+			macret = rtpgen_parse_macaddr(optarg);
+			if (macret == 0) {
+				printf("invalid mac address format\n");
+				rtpgen_usage(prgname);
+				return -1;
+			}
+			use_default_mac_peer=false;
 			break;
 
 
@@ -1278,13 +1330,14 @@ main(int argc, char **argv)
 		rte_eth_macaddr_get(portid,&l2fwd_ports_eth_addr[portid]);
 
 		// Set a destination mac addr
-		// TODO: setting from config
-		l2fwd_ports_eth_peer_addr[portid].addr_bytes[0]=0x20;
-		l2fwd_ports_eth_peer_addr[portid].addr_bytes[1]=0x00;
-		l2fwd_ports_eth_peer_addr[portid].addr_bytes[2]=0x00;
-		l2fwd_ports_eth_peer_addr[portid].addr_bytes[3]=0x00;
-		l2fwd_ports_eth_peer_addr[portid].addr_bytes[4]=0x00;
-		l2fwd_ports_eth_peer_addr[portid].addr_bytes[5]=0xff & portid;
+		if(use_default_mac_peer){
+			l2fwd_ports_eth_peer_addr[portid].addr_bytes[0]=0x20;
+			l2fwd_ports_eth_peer_addr[portid].addr_bytes[1]=0x00;
+			l2fwd_ports_eth_peer_addr[portid].addr_bytes[2]=0x00;
+			l2fwd_ports_eth_peer_addr[portid].addr_bytes[3]=0x00;
+			l2fwd_ports_eth_peer_addr[portid].addr_bytes[4]=0x00;
+			l2fwd_ports_eth_peer_addr[portid].addr_bytes[5]=0xff & portid;
+		}
 
 		/* init one RX queue */
 		fflush(stdout);
