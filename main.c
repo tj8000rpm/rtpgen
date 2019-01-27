@@ -550,8 +550,9 @@ rtpgen_usage(const char *prgname)
 	       "  -M PORT0_MACPEER,PORT1_MACPEER,...,PORTn_MACPEER: Peer MAC address for each port\n"
 	       "  -b BUFFER: number of mbuf pool size(%d default, %d maximum)\n"
 	       "  -f FILE: select rtp payload file(expected no header rtp file)\n"
+	       "  -t PAYLOAD_TYPE: rtp payload type(%d(PCMU) default)\n"
 	       "  -P SIZE: rtp payload size(%d default, %d maximum)\n"
-	       "  -t PAYLOAD_TYPE: rtp payload type(%d(PCMU) default)\n",
+	       "  -I PACKETIZATIOn_INTERVAL_MS: RTP packetization interval msec\n",
 	       prgname, NB_MBUF, MAX_NB_MBUF, RTPGEN_DEFAULT_RTP_PAYLOAD_LEN,
 		   RTPGEN_RTP_MAX_PAYLOAD_LEN, RTPGEN_RTP_PT_PCMU);
 }
@@ -646,6 +647,7 @@ static const char short_options[] =
 	"P:"  /* payload size */
 	"t:"  /* payload type */
 	"M:"  /* MAC Address peers */
+	"I:"  /* packetization interval */
 	;
 
 enum {
@@ -761,6 +763,16 @@ rtpgen_parse_args(int argc, char **argv)
 				return -1;
 			}
 			use_default_mac_peer=false;
+			break;
+
+		/* packetization interval */
+		case 'I':
+			rtpgen_rtp_tx_interval_us = rtpgen_parse_number(optarg, 0, 1000, 0) * 1000 ;
+			if (rtpgen_rtp_tx_interval_us == 0) {
+				printf("invalid packetization interval(ms)\n");
+				rtpgen_usage(prgname);
+				return -1;
+			}
 			break;
 
 

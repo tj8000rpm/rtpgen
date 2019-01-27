@@ -7,18 +7,20 @@ rtp traffic generator powerd by dpdk
 ## Example
 
 ```
-./build/rtpgen -c0x02 -- -p1 -T0 -P80 -t18 -M52:54:00:c6:1c:79  
+./build/rtpgen -c 0x02 -- -p 1 -T 0 -M 52:54:00:c6:1c:79 -P 160 -I 20 -t 0 -f sample_payload.raw
 ```
 
-- EAL Option -c0x02 : use 2nd core
-- -p1 : using one port only
-- -T0 : screen reflesh off
-- -P80 : payload length is 80 bytes
-- -M52:54:00:c6:1c:79 : port 0's peer ethernet address is '52:54:00:c6:1c:79'
+- EAL Option -c 0x02 : use 2nd core
+- -p 1 : using one port only
+- -T 0 : screen reflesh off
+- -M 52:54:00:c6:1c:79 : port 0's peer ethernet address is '52:54:00:c6:1c:79'
+- -P 160 : payload length is 160 bytes
+- -I 20 : ptime 20msec
+- -t 0 : RTP Payload Type is 0(PCMU/G.711)
+- -f sample_payload.raw : raw file of payload(PCMU/G.711 encoded/No headers)
 
 ## TODO
 ### Setting Options
-- ptime setting(currently 20ms)
 
 ### Features
 - Multiport support
