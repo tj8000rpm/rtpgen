@@ -13,7 +13,7 @@ dpdk 17.11 l2fwd sampleベース
 ## 特徴
 ### DPDKを用いた高速パケット転送
 - DPDKを用いた高速パケット送出（送信専用/受信パケットは破棄）
-- 10G NIC(Intel X550)にて1cpuあたりptime=20msec, 50,000セッション(片方向のみ)を実現
+- 10G NIC(Intel X540AT2)にて1cpuあたりptime=20msec, 50,000セッション(片方向のみ)を実現
 - 50,000session * 50pps/session = 250,0000pps = 250K pps
 - 250Kpps * 216 byte * 8bit = 4,320,000,000bps = 4.32Gbps
 - もう少しPPSは稼げる余地がありますがとりあえずこのぐらいにしてます(define RTPGEN_RTP_MAX_SESSIONS)
