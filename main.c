@@ -254,6 +254,7 @@ static unsigned
 rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts,unsigned *activeids, unsigned count){
 	struct rtpgen_rtp_hdr *rtp;
 	struct rte_mbuf *m;
+	struct ipv4_hdr *ip;
 	uint8_t *payload;
 	unsigned payload_idx;
 	uint8_t rtp_version;
@@ -265,16 +266,22 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts,unsigned *activei
 	struct rtpgen_rtp_config *rtp_conf;
 	
 	rtp_conf=rtp_configs_per_port[portid];
-	
+
+	// each packet
 	for(i=0;i<count;i++){
 		sessionid=activeids[i];
 
-		m=pkts[i];
+		m=pkts[i]; // バルクで確保したmbuf領域のアドレスの取得
+		// 事前に作成しているETH/IP/UDPヘッダをコピー
 		rte_memcpy((uint8_t *)m->buf_addr + m->data_off,
 			   (uint8_t *)&(constantHeaders[portid][sessionid]), sizeof(rtpgen_ethIpUdpHdr_t));
 		m->data_len=sizeof(rtpgen_ethIpUdpHdr_t);
 		m->pkt_len =sizeof(rtpgen_ethIpUdpHdr_t);
 
+		// store  ip v4 header offset -> for checksum calcuration
+		ip=rte_pktmbuf_mtod_offset(m, struct ipv4_hdr*, sizeof(struct ether_hdr));
+
+		// Append memory allocation for RTP header
 		rtp=(struct rtpgen_rtp_hdr *)rte_pktmbuf_append(m,sizeof(struct rtpgen_rtp_hdr));
 
 		// add RTP headers;
@@ -304,6 +311,9 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts,unsigned *activei
 
 		rtp_conf[sessionid].rtp_timestamp+=rtpgen_rtp_payload_len;
 		rtp_conf[sessionid].rtp_sequence+=1;
+
+		ip->hdr_checksum=rte_ipv4_cksum(ip);
+		//printf("check sum ---- %x\n", ip->hdr_checksum);
 	}
 	
 	return count;
@@ -925,6 +935,7 @@ uint32_t api_sub_call_write(RtpConfigV1 *source,
 		if(source->has_rtp_timestamp) target->rtp_timestamp = source->rtp_timestamp;
 		if(source->has_rtp_sequence ) target->rtp_sequence  = source->rtp_sequence;
 		if(source->has_rtp_ssrc     ) target->rtp_ssrc      = source->rtp_ssrc;
+
 	}
 	return RTPGEN_IPCMSG_V1__RESPONSE__SUCCESS;
 }
@@ -1463,7 +1474,7 @@ main(int argc, char **argv)
 			constantHeaders[portid][i].ip.dst_addr=rte_be_to_cpu_32(IPv4(127,0,0,1));
 			constantHeaders[portid][i].ip.src_addr=rte_be_to_cpu_32(IPv4(127,0,0,1));
 			constantHeaders[portid][i].ip.version_ihl=0x45;
-			constantHeaders[portid][i].ip.type_of_service=0x05;
+			constantHeaders[portid][i].ip.type_of_service=0xa0;
 			constantHeaders[portid][i].ip.total_length=rte_be_to_cpu_16(len);
 			constantHeaders[portid][i].ip.packet_id=0;
 			constantHeaders[portid][i].ip.fragment_offset=rte_be_to_cpu_16(0x4000);
