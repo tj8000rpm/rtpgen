@@ -252,6 +252,7 @@ print_stats(void)
 // 送信タイミングでのpacketの生成
 static unsigned
 rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts,unsigned *activeids, unsigned count){
+	struct ipv4_hdr *ip;
 	struct rtpgen_rtp_hdr *rtp;
 	struct rte_mbuf *m;
 	uint8_t *payload;
@@ -276,6 +277,10 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts,unsigned *activei
 			   (uint8_t *)&(constantHeaders[portid][sessionid]), sizeof(rtpgen_ethIpUdpHdr_t));
 		m->data_len=sizeof(rtpgen_ethIpUdpHdr_t);
 		m->pkt_len =sizeof(rtpgen_ethIpUdpHdr_t);
+
+		// store compute checksum and set ID
+		ip=rte_pktmbuf_mtod_offset(m, struct ipv4_hdr *,
+				                        sizeof(struct ether_hdr));
 
 		// Append memory allocation for RTP header
 		rtp=(struct rtpgen_rtp_hdr *)rte_pktmbuf_append(m,sizeof(struct rtpgen_rtp_hdr));
@@ -307,6 +312,10 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts,unsigned *activei
 
 		rtp_conf[sessionid].rtp_timestamp+=rtpgen_rtp_payload_len;
 		rtp_conf[sessionid].rtp_sequence+=1;
+
+		ip->packet_id=rte_be_to_cpu_16(rte_rand());
+		ip->hdr_checksum=0;
+		ip->hdr_checksum=rte_ipv4_cksum(ip);
 	}
 	
 	return count;
