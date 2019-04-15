@@ -254,7 +254,6 @@ static unsigned
 rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts,unsigned *activeids, unsigned count){
 	struct rtpgen_rtp_hdr *rtp;
 	struct rte_mbuf *m;
-	struct ipv4_hdr *ip;
 	uint8_t *payload;
 	unsigned payload_idx;
 	uint8_t rtp_version;
@@ -277,9 +276,6 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts,unsigned *activei
 			   (uint8_t *)&(constantHeaders[portid][sessionid]), sizeof(rtpgen_ethIpUdpHdr_t));
 		m->data_len=sizeof(rtpgen_ethIpUdpHdr_t);
 		m->pkt_len =sizeof(rtpgen_ethIpUdpHdr_t);
-
-		// store  ip v4 header offset -> for checksum calcuration
-		ip=rte_pktmbuf_mtod_offset(m, struct ipv4_hdr*, sizeof(struct ether_hdr));
 
 		// Append memory allocation for RTP header
 		rtp=(struct rtpgen_rtp_hdr *)rte_pktmbuf_append(m,sizeof(struct rtpgen_rtp_hdr));
@@ -311,9 +307,6 @@ rtpgen_setup_newpacket(uint16_t portid, struct rte_mbuf **pkts,unsigned *activei
 
 		rtp_conf[sessionid].rtp_timestamp+=rtpgen_rtp_payload_len;
 		rtp_conf[sessionid].rtp_sequence+=1;
-
-		ip->hdr_checksum=rte_ipv4_cksum(ip);
-		//printf("check sum ---- %x\n", ip->hdr_checksum);
 	}
 	
 	return count;
@@ -936,6 +929,8 @@ uint32_t api_sub_call_write(RtpConfigV1 *source,
 		if(source->has_rtp_sequence ) target->rtp_sequence  = source->rtp_sequence;
 		if(source->has_rtp_ssrc     ) target->rtp_ssrc      = source->rtp_ssrc;
 
+		header->ip.hdr_checksum=0;
+		header->ip.hdr_checksum=rte_ipv4_cksum(&(header->ip));
 	}
 	return RTPGEN_IPCMSG_V1__RESPONSE__SUCCESS;
 }
